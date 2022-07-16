@@ -1,0 +1,43 @@
+BACKUP ~weidu_external/backup/dw_portrait_template~
+SUPPORT ~https://www.gibberlings3.net/forums/forum/28-miscellaneous-released-mods/~
+
+VERSION "beta 1"
+
+AUTO_EVAL_STRINGS
+
+							  
+							  
+ALWAYS
+
+	INCLUDE "%MOD_FOLDER%/lib/sfo_core.tpc"				// self-contained wrap of SFO's core functions
+	INCLUDE "%MOD_FOLDER%/lib/ui_add_portraits.tpc"		// the main add-portraits functions, plus bundled data on core portraits
+	INCLUDE "%MOD_FOLDER%/lib/cd_portrait_copy.tph"		// CamDawg's portrait code, for non-EE installs
+END
+
+
+// Readme and language blocks go here
+
+BEGIN "Hannah's Portrait Pack" DESIGNATED 10
+
+LAF ui_add_portraits
+	STR_VAR portrait_path="%MOD_FOLDER%/img"
+			portrait_table="%MOD_FOLDER%/data/hannah_portraits.2da"
+END
+
+BEGIN "Default character colors match portrait colors" DESIGNATED 20
+
+LAF activate_portrait_coloring END
+
+
+/* for modders: 
+
+Uncomment and run this component to edit the UI to display the numerical values of
+'skin', 'hair', 'major', 'minor' in the color-selector customization screen.
+Use this to quickly find the appropriate colors for your portrait.
+
+BEGIN "color finder" DESIGNATED 1000
+
+LAF color_finder_tool END
+
+
+*/
