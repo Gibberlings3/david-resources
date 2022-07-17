@@ -1,0 +1,193 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+
+<head>
+    <title>Copy Portraits and Sounds</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+    <link rel="stylesheet" href="style/g3readme_cam_022916_dwedit.css" type="text/css" />
+    <link href="style/g3icon.ico" rel="icon" type="image/bmp" />
+</head>
+
+<body>
+    <div id="container">
+        <div class="ribbon_menu">
+            <ul>
+                <li><a href="#over">Overview</a></li>
+                <li><a href="#finding">Finding your Games</a></li>
+                <li><a href="#compatibility">Compatibility</a></li>
+                <li><a href="#install">Installation</a></li>
+                <li><a href="#content">Detailed content</a></li>
+                <li><a href="#acknow">Acknowledgements</a></li>
+                <li><a href="#copy">Copyright info</a></li>
+                <li><a href="#version">History</a></li>
+            </ul>
+            <span>
+                <!--<img src="style/logo.gif" width="305" height="83" alt="G3" />--></span>
+        </div>
+        <div class="ribbon_bubble">
+            <div class="ribbon_rectangle">
+                <h1>Copy Portraits and Sounds</h1>
+            </div>
+
+            <div class="ribbon_triangle-l"></div>
+            <div class="ribbon_triangle-r"></div>
+            <div class="section">
+                <!--<p><strong><a href="http://www.gibberlings3.net/">A Gibberlings Three Mod</a><br /></strong>-->
+                Author: </strong>
+                <a href="https://www.gibberlings3.net/profile/1067-davidw/">DavidW</a>
+                <!--</p>-->
+                <p>
+                    <strong>Version: beta 1</a></strong><br />
+                    <strong>Languages: </strong>English<br />
+                    <strong>Platforms: </strong>Windows
+                </p>
+            </div>
+            <div class="ribbon_rectangle_h2">
+                <h2><a name="over" id="over"></a>Overview</h2>
+            </div>
+
+            <div class="ribbon_triangle_h2-l"></div>
+            <div class="ribbon_triangle_h2-r"></div>
+            <div class="section">
+                <p>
+                    This is a simple mod that just copies the portraits and sounds between different Enhanced Edition games (specifically, between the enhanced versions of Icewind Dale,
+					Baldur's Gate, and Baldur's Gate II). All relevant text strings (for instance, sound subtitles) are also copied. The portraits and soundsets are inserted into the game
+					in the same way as original-game resources, hopefully seamlessly. (For instance, portraits will be separated by sex, class and race.) The mod also installs the portraits from Icewind Dale II, and has components to remove the portraits of
+					joinable BG and BG2 characters and to set the default colors of characters to match their portraits. You will (of course) need to have the various games installed to do a resource copy.
+                </p>
+				<p>(Why copy resources over rather than just shipping them with the mod? Partly download time (I accept this is not a big deal these days). Partly future-proofing against 
+				subsequent game updates. Mostly because I feel slightly uncomfortable just bulk copying resources like this between games, especially actively-supported games. I accept this is a gray area.)</p>
+            </div>
+           <div class="ribbon_rectangle_h2">
+                <h2><a name="finding" id="finding"></a>Finding your Games</h2>
+            </div>
+            <div class="ribbon_triangle_h2-l"></div>
+            <div class="ribbon_triangle_h2-r"></div>
+
+            <div class="section">
+			<p>
+			Because this mod copies resources between different Infinity Engine games, it has to be able to find those games. By default, it assumes that any games you have are sitting in the same directory as your current game folder. (So if, for instance, you have Baldur's Gate: Enhanced edition in the folder 'C:\games\bgee', the mod assumes that Icewind Dale:Enhanced Edition is also in some folder in C:\games, such as C:\games\iwdee. (If the folder is there, it doesn't matter what it's called.)
+			</p>
+			<p>
+			This should cover most standard installation patterns. However, if you have a more exotic setup you can tell the mod where to look explicitly. Open dw_port_snd/dw_port_snd.ini, and edit game_location_iwdee (and similar) to give the exact path of your game. (e.g. C:\games\bgee).
+			</p>
+			<p>
+			If you have multiple copies of the games installed, the mod defaults to the most recent copy (based on the date in build-date.txt, and only to the nearest year.)
+			</p>
+			</div>
+            <div class="ribbon_rectangle_h2">
+                <h2><a name="compat" id="compat"></a>Compatibility</h2>
+            </div>
+            <div class="ribbon_triangle_h2-l"></div>
+            <div class="ribbon_triangle_h2-r"></div>
+
+            <div class="section">
+                <p>
+                    Copy Portraits and Sounds is compatible with any of Baldur's Gate: Enhanced Edition (with or without Siege of Dragonspear), Baldur's Gate II: Enhanced Edition, and Icewind Dale: Enhanced Edition. It is probably compatible with Enhanced Edition Trilogy, but I haven't tested it. It is not compatible with pre-Enhanced-Edition versions of the games.</p>
+                <p>
+                    Copy Portraits and Sounds makes some tweaks to the game's user interface, so it should be installed after any mod that does a wholesale revision of the user interface. The mod is fairly light-touch and compatibility-friendly in its own edits, so I don't anticipate incompatibility with other mods that edit the user interface... but UI modding is a complicated profession so it is always possible something might creep through.</p>
+                </p>
+                <p>Copy Portraits and Sounds only works on Windows. It would probably be pretty trivial to modify it to work on OSX or Linux, but I lack the knowledge and the testing environment.</p>
+            </div>
+            <div class="ribbon_rectangle_h2">
+                <h2><a name="install" id="install"></a>Installation</h2>
+            </div>
+            <div class="ribbon_triangle_h2-l"></div>
+            <div class="ribbon_triangle_h2-r"></div>
+
+
+            <div class="section">
+                <p>
+					<p><b>(This is not currently correct as I'm not bundling a release, but it would be if I released it.)</b></p>
+					<p>
+                    Copy Portraits and Sounds is distributed as a self-extracting archive and includes a WeiDU installer. To install,
+                    simply double-click the archive and follow the instructions on screen.
+                </p>
+                <p>
+                    Alternatively, the files can be extracted into your game directory using
+                    <a href="http://www.7-zip.org/download.html">7zip</a> or <a
+                        href="http://www.rarlab.com/download.htm">WinRAR</a>.
+                    When properly extracted, your game directory will contain <strong>setup-dw_port_snd.exe</strong> and
+                    the folder
+                    <strong>dw_port_snd</strong>. To install, double-click <strong>setup-dw_port_snd.exe</strong> and follow
+                    the instructions on screen.
+                </p>
+                <p>
+                    You can run <strong>setup-dw_port_snd.exe</strong> in your game folder to reinstall, uninstall or
+                    otherwise change components.</p>
+
+                <p>
+                    <strong>Note for Complete Uninstallation</strong><br />
+                    In addition to the methods above for removing individual components, you can completely uninstall
+                    the mod using setup-dw_port_snd --uninstall at the command line to remove all components without
+                    wading through prompts.
+                </p>
+            </div>
+
+            <div class="ribbon_rectangle_h2">
+                <h2><a name="content" id="content"></a>Contents</h2>
+            </div>
+            <div class="ribbon_triangle_h2-l"></div>
+            <div class="ribbon_triangle_h2-r"></div>
+            <div class="section">
+			<p><strong>Include portraits from Baldur's Gate II: Enhanced Edition (BGEE, IWDEE)</strong></p>
+			<p>This component collects and installs the portraits from BG2EE. You must have a copy of BG2EE installed, and the mod must be able to find it. (See above.)</p>
+			<p><strong>Include portraits from Icewind Dale: Enhanced Edition (BGEE, BG2EE)</strong></p>
+			<p>This component collects and installs the portraits from IWDEE. You must have a copy of IWDEE installed, and the mod must be able to find it. (See above.)</p>
+			<p><strong>Include portraits from Icewind Dale II (IWDEE, BGEE, BG2EE)</strong></p>
+			<p>This component collects and installs the portraits from IWD II. (It's not straightforward to pick these up, so the mod contains the files directly.)</p>
+			<p><strong>Hide portraits used by joinable NPCs (BGEE, BG2EE)</strong></p>
+			<p>Many of the portraits in BGEE and BG2EE are shared by joinable non-player characters. This component just hides those portraits in character creation so that you can be confident of not picking one.</p>
+			<p><strong>Match default colors to portraits (IWDEE, BGEE, BG2EE)</strong></p>
+			<p>Borrowed from Icewind Dale II, this is a convenience/immersion tweak that presets the colors of your character in character generation to match your portrait. (You can change them freely; it's just the starting values that are set.) This works for any of the portraits from BGEE, BG2EE, IWDEE, and IWD2.</p>
+			<p><strong>Collect soundsets from Icewind Dale: Enhanced Edition (BGEE, BG2EE)</strong></p>
+			<p>This component collects and installs the soundsets from IWDEE. You must have a copy of IWDEE installed, and the mod must be able to find it. (See above.)</p>
+			<p><strong>Collect soundsets from Baldur's Gate: Enhanced Edition (IWDEE, BG2EE)</strong></p>
+			<p>This component collects and installs the soundsets from BGEE (including the ones in Siege of Dragonspear if you have it installed). You must have a copy of BGEE installed, and the mod must be able to find it. (See above.)</p>
+			<p><strong>Collect soundsets from Baldur's Gate II: Enhanced Edition (IWDEE, BGEE)</strong></p>
+			<p>This component collects and installs the soundsets from BG2EE. You must have a copy of BG2EE installed, and the mod must be able to find it. (See above.)</p>
+
+            </div>
+            
+            <div class="ribbon_rectangle_h2">
+                <h2><a name="acknow" id="acknow"></a>Acknowledgements</h2>
+            </div>
+            <div class="ribbon_triangle_h2-l"></div>
+            <div class="ribbon_triangle_h2-r"></div>
+            <div class="section">
+                <p>
+                    As always, thanks to those who created the tools that made the modern Infinity Engine modding scene
+                    possible: in particular, Westley Weimer, for the original WeiDU; TheBigg and Wisp for developing it
+                    into the remarkable tool it now is; the various contributors to Near Infinity, which grows more powerful with every iteration.
+                </p>
+            </div>
+            <div class="ribbon_rectangle_h2">
+                <h2><a name="copy" id="copy"></a>Copyright Information</h2>
+            </div>
+            <div class="ribbon_triangle_h2-l"></div>
+            <div class="ribbon_triangle_h2-r"></div>
+            <div class="section">
+  <p>The code (though none of the artwork) in Copy Portraits and Sounds is &copy;2022-Present, David
+    Wallace.</p>
+  <p>Since in practice I'm obviously not going to sue anyone, I'll use this section to say what I'd <b>like</b> people's attitude to re-using and redistributing my mods. Basically, I don't mind
+  what you do with the code provided you (a) give me full credit when you borrow or re-use my code in your own mod, and (b) don't actually mirror this mod (or any modified version of this mod) somewhere else.</p>
+
+            </div>
+            <div class="ribbon_rectangle_h2">
+                <h2><a name="version" id="version"></a>Version History</h2>
+            </div>
+
+            <div class="ribbon_triangle_h2-l"></div>
+            <div class="ribbon_triangle_h2-r"></div>
+            <div class="section">
+               <p>
+                    <b>Version beta 1 </b>(July 2022)
+				</p>
+					<p>
+					Original soft release.
+                </p>
+         </div>
+    </div>
+</body>
+
+</html>

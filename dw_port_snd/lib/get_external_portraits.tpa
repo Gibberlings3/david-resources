@@ -1,0 +1,83 @@
+DEFINE_ACTION_FUNCTION get_external_portraits STR_VAR version="" BEGIN
+
+	MKDIR "%workspace%/copy/portraits"
+	MKDIR "%workspace%/copy/sounds"
+
+	ACTION_IF !FILE_EXISTS weidu.exe BEGIN
+		COPY_EXISTING "setup-%MOD_FOLDER%.exe" "weidu.exe"
+	END
+	
+	ACTION_MATCH "%version%" WITH
+	bg2ee BEGIN
+		OUTER_SET this_game=1
+		OUTER_SPRINT file_list "portrait_data_bg portrait_data_bg2"
+		OUTER_SPRINT ini game_location_bg2
+	END
+	iwdee BEGIN
+		OUTER_SET this_game=2
+		OUTER_SPRINT file_list "portrait_data_iwd"
+		OUTER_SPRINT ini game_location_iwd
+	END
+	DEFAULT
+		FAIL "illegal argument %version% in get_external_portraits"
+	END
+
+	MKDIR "%workspace%/copy/portraits"
+	MKDIR "%workspace%/copy/sounds"
+
+	ACTION_IF !FILE_EXISTS weidu.exe BEGIN
+		COPY_EXISTING "setup-%MOD_FOLDER%.exe" "weidu.exe"
+	END
+	
+	LAF find_external_game STR_VAR game="%version%" ini RET game_loc END
+	COPY ".../stratagems-inline/get_external_portraits.tp2" "%workspace%" 
+		REPLACE_TEXTUALLY FILE_LIST "%file_list%"
+	AT_NOW ~weidu.exe --game "%game_loc%" "%workspace%\get_external_portraits.tp2" --use-lang %EE_LANGUAGE% --force-install 0 --yes~ 		
+	COPY "%game_loc%/lang/%EE_LANGUAGE%/sounds" "%workspace%/copy/sounds"
+
+
+	LAF ui_add_portraits STR_VAR portrait_path="%workspace%/copy/portraits"  END
+
+
+END
+
+
+
+
+<<<<<<<< .../stratagems-inline/get_external_portraits.tp2
+
+BACKUP ~weidu_external/backup/get_external_portraits~
+AUTHOR "DavidW"
+
+VERSION ~1.0~
+
+AUTO_EVAL_STRINGS
+
+BEGIN "get external data" DESIGNATED 0 NO_LOG_RECORD
+
+ACTION_CLEAR_ARRAY all_portraits_list
+ACTION_FOR_EACH file IN FILE_LIST BEGIN
+	COPY "dw_talents\lua\portrait_data\%file%.2da" "%workspace%"
+		COUNT_2DA_COLS colcount
+		COUNT_2DA_ROWS colcount rowcount
+		FOR (row=0;row<rowcount;++row) BEGIN
+			READ_2DA_ENTRY row 0 colcount portrait
+			SPRINT $all_portraits_list("%portrait%") ""
+		END
+	BUT_ONLY
+END
+
+ACTION_PHP_EACH all_portraits_list AS prefix=>discard BEGIN
+	ACTION_IF FILE_EXISTS_IN_GAME "%prefix%L.bmp" BEGIN
+	 ACTION_IF !FILE_EXISTS "weidu_external\workspace\copy\portraits\%prefix%L\.bmp" BEGIN
+	 ACTION_TRY
+	  COPY_EXISTING_REGEXP "%prefix%.*\.bmp" "weidu_external\workspace\copy\portraits"
+	 WITH DEFAULT
+		PRINT "can't find %prefix%; continuing anyway"
+	 END
+	END
+	END
+END
+
+
+>>>>>>>>

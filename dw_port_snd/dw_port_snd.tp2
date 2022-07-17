@@ -1,0 +1,109 @@
+BACKUP ~weidu_external/backup/dw_port_snd~
+SUPPORT ~tbc~
+
+VERSION "beta 1"
+
+AUTO_EVAL_STRINGS
+
+							  
+							  
+ALWAYS
+
+	INCLUDE "%MOD_FOLDER%/lib/sfo_core.tpc"				// self-contained wrap of SFO's core functions
+	INCLUDE "%MOD_FOLDER%/lib/ui_add_portraits.tpc"		// the main add-portraits functions, plus bundled data on core portraits
+	INCLUDE "%MOD_FOLDER%/lib/cd_portrait_copy.tph"		// CamDawg's portrait code, for non-EE installs
+	INCLUDE "%MOD_FOLDER%/lib/find_external_game.tph"
+END
+
+LANGUAGE ~English~  ~english~ ~dw_port_snd/lang/english/setup.tra~
+
+
+
+//////////////////////////////////////////////////////////////////////
+/// Include BG2 portraits
+//////////////////////////////////////////////////////////////////////
+
+
+BEGIN @1 DESIGNATED 100 
+
+REQUIRE_PREDICATE GAME_IS "bgee bg2ee eet iwdee" @100
+REQUIRE_PREDICATE GAME_IS "bgee iwdee" @102
+
+INCLUDE "%MOD_FOLDER%/lib/get_external_portraits.tpa"
+LAF get_external_portraits STR_VAR version=bg2ee END
+
+//////////////////////////////////////////////////////////////////////
+/// Include IWD portraits
+//////////////////////////////////////////////////////////////////////
+
+BEGIN @2 DESIGNATED 200
+
+REQUIRE_PREDICATE GAME_IS "bgee bg2ee eet iwdee" @100
+REQUIRE_PREDICATE GAME_IS "bgee bg2ee eet" @101
+
+INCLUDE "%MOD_FOLDER%/lib/get_external_portraits.tpa"
+LAF get_external_portraits STR_VAR version=iwdee END
+
+//////////////////////////////////////////////////////////////////////
+/// Include IWD2 portraits
+//////////////////////////////////////////////////////////////////////
+
+BEGIN @3 DESIGNATED 300 
+
+REQUIRE_PREDICATE GAME_IS "bgee bg2ee eet iwdee" @100
+
+LAF ui_add_portraits STR_VAR portrait_path="%MOD_FOLDER%/img" portrait_table="%MOD_FOLDER%/data/portrait_data_iwd2.2da" END
+
+//////////////////////////////////////////////////////////////////////
+/// Hide NPC portraits
+//////////////////////////////////////////////////////////////////////
+
+BEGIN @4 DESIGNATED 400
+
+REQUIRE_PREDICATE GAME_IS "bgee bg2ee eet iwdee" @100
+
+LAF ui_add_portraits STR_VAR disable="kivan alora branwe dynahei faldorn imoen jaheira safana shartel skie viconia neera ajantis coran edwin eldoth garrick kagain khalid minsc montar quayle tiax xan xzar yeslick rasaad dorn ncernd nkeldor nanomen nedwin nhaer njan nminsc nvalyga nyoshim nnalia nmazzy naerie njaheir nvicon ohhex nkorgan" END
+
+//////////////////////////////////////////////////////////////////////
+/// Portrait coloring
+//////////////////////////////////////////////////////////////////////
+
+BEGIN @5 DESIGNATED 500 
+
+REQUIRE_PREDICATE GAME_IS "bgee bg2ee eet iwdee" @100
+
+LAF activate_portrait_coloring END
+
+//////////////////////////////////////////////////////////////////////
+/// Get soundsets from Icewind Dale
+//////////////////////////////////////////////////////////////////////
+
+BEGIN @11 DESIGNATED 1000
+
+REQUIRE_PREDICATE GAME_IS "bgee bg2ee eet" @101
+INCLUDE "%MOD_FOLDER%/lib/get_external_sounds.tpa"
+LAF check_ini STR_VAR ini=soundsets_iwdee RET soundset_list=value END
+LAF get_external_sounds STR_VAR soundset_list version=iwdee END
+
+//////////////////////////////////////////////////////////////////////
+/// Get soundsets from Baldur's Gate
+//////////////////////////////////////////////////////////////////////
+
+BEGIN @12 DESIGNATED 1100
+
+REQUIRE_PREDICATE GAME_IS "bg2ee iwdee" @103
+INCLUDE "%MOD_FOLDER%/lib/get_external_sounds.tpa"
+LAF check_ini STR_VAR ini=soundsets_bgee RET soundset_list=value END
+LAF get_external_sounds STR_VAR soundset_list version=bgee END
+
+//////////////////////////////////////////////////////////////////////
+/// Get soundsets from Baldur's Gate II
+//////////////////////////////////////////////////////////////////////
+
+BEGIN @13 DESIGNATED 1200
+
+REQUIRE_PREDICATE GAME_IS "bgee iwdee" @102
+INCLUDE "%MOD_FOLDER%/lib/get_external_sounds.tpa"
+LAF check_ini STR_VAR ini=soundsets_bgee RET soundset_list=value END
+LAF get_external_sounds STR_VAR soundset_list version=bg2ee END
+

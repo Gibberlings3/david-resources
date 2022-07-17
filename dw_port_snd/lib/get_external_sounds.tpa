@@ -1,0 +1,302 @@
+DEFINE_ACTION_FUNCTION get_external_sounds 
+	STR_VAR version=""
+			sounds=""
+			soundset_list=""
+BEGIN
+
+	LAF fix_soundset_ui_bug END
+	LAF tidy_sound_selection_screen END
+
+	MKDIR "%workspace%/copy/portraits"
+	MKDIR "%workspace%/copy/sounds"
+
+	ACTION_IF !FILE_EXISTS weidu.exe BEGIN
+		COPY_EXISTING "setup-%MOD_FOLDER%.exe" "weidu.exe"
+	END
+	
+	ACTION_MATCH "%version%" WITH
+	bgee BEGIN
+		OUTER_SPRINT ini game_location_bgee
+		OUTER_SPRINT sound_root bg1sn
+	END
+	bg2ee BEGIN
+		OUTER_SPRINT ini game_location_bg2ee
+		OUTER_SPRINT sound_root bg2sn
+	END
+	iwdee BEGIN
+		OUTER_SPRINT ini game_location_iwdee
+		OUTER_SPRINT sound_root iwdsn
+	END
+	sod BEGIN
+		OUTER_SPRINT ini game_location_sod
+		OUTER_SPRINT sound_root sodsn	
+	END
+	DEFAULT
+		FAIL "illegal argument %version% in get_external_sounds"
+	END
+	
+	LAF find_external_game STR_VAR game="%version%" ini RET game_loc END
+
+
+	ACTION_IF !FILE_EXISTS weidu.exe BEGIN
+		COPY_EXISTING "setup-%MOD_FOLDER%.exe" "weidu.exe"
+	END
+	
+	// get the data from the external game
+	MKDIR "weidu_external\workspace\copy\sounds"
+	COPY ".../stratagems-inline/blank" "weidu_external\workspace\copy\sounds\sndtra.tra"
+	COPY ".../stratagems-inline/blank" "weidu_external\workspace\copy\sounds\sndname.2da"
+	COPY ".../stratagems-inline/get_external_sounds.tp2" "%workspace%"
+	AT_NOW ~weidu.exe --game "%game_loc%" "%workspace%/get_external_sounds.tp2" --use-lang %EE_LANGUAGE% --force-install 0 --yes~ 		
+	
+	// filter out sounds already present
+	
+	
+	// define renames and copy over the actual sounds
+	
+	ACTION_TO_UPPER soundset_list
+	LAF array_keys_from_string STR_VAR string="%soundset_list%" RET_ARRAY soundset_array=array END
+	OUTER_SET counter=0
+	ACTION_PHP_EACH soundset_array AS old=>discard BEGIN
+		OUTER_SET ++counter
+		ACTION_IF counter<10 BEGIN
+			OUTER_SPRINT new "%sound_root%0%counter%"
+		END ELSE BEGIN
+			OUTER_SPRINT new "%sound_root%%counter%"
+		END
+		ACTION_TO_UPPER new
+		OUTER_SPRINT $soundset_array("%old%") "%new%"
+		ACTION_BASH_FOR "%game_loc%/lang/%EE_LANGUAGE%/sounds" "%old%.*\.wav" BEGIN
+			OUTER_PATCH_SAVE new_res "%BASH_FOR_RES%" BEGIN
+				REPLACE_TEXTUALLY "%old%" "%new%"
+			END
+			COPY "%BASH_FOR_FILESPEC%" "lang\%EE_LANGUAGE%\sounds\%new_res%.wav"
+		END
+	END
+	
+	WITH_TRA "weidu_external/workspace/copy/sounds/sndtra.tra" BEGIN
+
+		// update BGEE.lua
+
+		LAF 2da_read STR_VAR file=sndname.2da path="weidu_external/workspace/copy/sounds" RET_ARRAY sndname_array=array  END
+		OUTER_SPRINT bgee_add ""
+		ACTION_PHP_EACH soundset_array AS old=>new BEGIN
+			ACTION_IF VARIABLE_IS_SET $sndname_array("%old%" STRREF) BEGIN
+				OUTER_SET strref_old=$sndname_array("%old%" STRREF)
+				OUTER_SET strref_new=RESOLVE_STR_REF ((AT strref_old))
+				OUTER_SET num=$sndname_array("%old%" NUM)
+			END ELSE BEGIN
+				LAF make_pretty_sound_name STR_VAR resref="%old%" game="%version%" RET name END
+				OUTER_SET strref_new=RESOLVE_STR_REF("%name%")
+				OUTER_SET num=2
+			END 
+			OUTER_SPRINT bgee_add "%bgee_add%filenames_stringrefs['%new%'] = {%strref_new%, %num%}%WNL%"
+		END
+		COPY_EXISTING "bgee.lua" override
+			REPLACE_TEXTUALLY "filenames_stringrefs={}" "filenames_stringrefs={}%WNL%%bgee_add%"
+
+		// update charsnd
+		
+		LAF 2da_read STR_VAR file=charsnd.2da path="weidu_external/workspace/copy/sounds" RET_ARRAY charsnd_array_new=array  END
+		COPY_EXISTING charsnd.2da override
+			LPF 2da_read RET_ARRAY charsnd_array=array charsnd_rows=rows END
+			PHP_EACH soundset_array AS old=>new BEGIN
+				PHP_EACH charsnd_rows AS row=>discard BEGIN
+					SPRINT old_strref $charsnd_array_new("%row%" "%old%")
+					old_strref=IS_AN_INT old_strref? old_strref:"-1"
+					SET $charsnd_array("%row%" "%new%")=old_strref>=0?RESOLVE_STR_REF ((AT old_strref)) : old_strref
+				END
+			END
+			LPF 2da_write STR_VAR array=charsnd_array END
+	END
+	
+
+END
+
+
+
+DEFINE_ACTION_FUNCTION fix_soundset_ui_bug BEGIN
+
+	LAF check_label STR_VAR label="dw-fixed_soundset_ui_bug" RET value END
+	ACTION_IF !value BEGIN
+		LAF make_label STR_VAR label="dw-fixed_soundset_ui_bug" END
+		COPY_EXISTING "ui.menu" override
+			LPF UI_replace_function INT_VAR inline=1 STR_VAR function=compareCustomSound new_function=".../stratagems-inline/sound_compare.lua" END
+		BUT_ONLY
+	END
+
+
+
+
+END
+
+DEFINE_DIMORPHIC_FUNCTION make_pretty_sound_name STR_VAR resref="" game="" RET name BEGIN
+
+	ACTION_MATCH "%game%" WITH
+	bgee BEGIN
+			OUTER_SPRINT prefix "BG1: "	
+	END
+	bg2ee BEGIN
+			OUTER_SPRINT prefix "BG2: "	
+	END 
+	iwdee BEGIN
+			OUTER_SPRINT prefix "IWD: "	
+	END
+	DEFAULT // assume native game
+		ACTION_IF is_bg2 BEGIN
+			OUTER_SPRINT prefix "BG2: "
+		END ELSE
+		ACTION_IF is_bg1 BEGIN
+			OUTER_SPRINT prefix "BG1: "
+		END ELSE
+		ACTION_IF is_iwd BEGIN
+			OUTER_SPRINT prefix "IWD: "
+		END ELSE BEGIN
+			OUTER_SPRINT prefix "" // god knows
+		END	
+	END
+	OUTER_SPRINT name "%resref%"
+	ACTION_TO_LOWER name
+	OUTER_PATCH_SAVE name "%name%" BEGIN
+		// capitalize first letter only
+		READ_ASCII 0x0 first_letter (1)
+		TO_UPPER first_letter
+		WRITE_ASCII 0x0 "%first_letter%"
+		// put space before any final numbers
+		REPLACE_TEXTUALLY "\([0-9]+\)$" " \1"
+	END
+	OUTER_SPRINT name "%prefix%%name%"
+
+END
+
+DEFINE_ACTION_FUNCTION tidy_sound_selection_screen BEGIN
+
+	// get all the sounds used
+	
+	ACTION_BASH_FOR "lang/%EE_LANGUAGE%/sounds" ".*A\.wav" BEGIN
+	
+		OUTER_PATCH_SAVE resref "%BASH_FOR_RES%" BEGIN
+			DELETE_BYTES (BUFFER_LENGTH - 1) 1
+		END
+		ACTION_TO_UPPER resref
+		OUTER_SPRINT $sounds_used("%resref%") ""
+		
+	END
+	
+	// get all the sounds set in bgee.lua
+	
+	COPY_EXISTING - bgee.lua nowhere
+		REPLACE_TEXTUALLY "--.*" ""
+		REPLACE_EVALUATE "filenames_stringrefs\['\([^']*\)'\]" BEGIN
+			SPRINT resref_here "%MATCH1%"
+			TO_UPPER resref_here
+			SPRINT $sounds_in_bgee("%resref_here%") ""
+		END
+		""
+
+	// find a prefix
+	
+	ACTION_IF is_bg2 BEGIN
+		OUTER_SPRINT prefix "BG2: "
+	END ELSE
+	ACTION_IF is_bg1 BEGIN
+		OUTER_SPRINT prefix "BG1: "
+	END ELSE
+	ACTION_IF is_iwd BEGIN
+		OUTER_SPRINT prefix "IWD: "
+	END ELSE BEGIN
+		OUTER_SPRINT prefix "" // god knows
+	END
+	
+	// identify new names for unnamed sounds
+	
+	OUTER_SPRINT data ""
+	ACTION_PHP_EACH sounds_used AS resref=>discard BEGIN
+		ACTION_IF !VARIABLE_IS_SET $sounds_in_bgee("%resref%") BEGIN
+			LAF make_pretty_sound_name STR_VAR resref RET name END
+			OUTER_SET strref=RESOLVE_STR_REF ("%name%")	
+			OUTER_SPRINT data "%data%filenames_stringrefs['%resref%'] = {%strref%, 2}%WNL%"
+		END
+	END
+	
+	COPY_EXISTING "bgee.lua" override
+			REPLACE_TEXTUALLY "filenames_stringrefs={}" "filenames_stringrefs={}%WNL%%data%"
+
+
+END
+
+
+<<<<<<<<.../stratagems-inline/get_external_sounds.tp2
+
+BACKUP ~weidu_external/backup/get_external_sounds~
+AUTHOR "DavidW"
+
+VERSION ~1.0~
+
+AUTO_EVAL_STRINGS
+
+BEGIN "get external data" DESIGNATED 0 NO_LOG_RECORD
+
+// charsnd - subtitles
+COPY_EXISTING "charsnd.2da" "weidu_external\workspace\copy\sounds\charsnd.2da"
+	COUNT_2DA_COLS colcount
+	READ_2DA_ENTRIES_NOW charsnd_data colcount
+	FOR (row=0;row<charsnd_data;++row) BEGIN
+		FOR (col=1;col<colcount;++col) BEGIN
+			READ_2DA_ENTRY_FORMER charsnd_data row col strref
+			PATCH_IF strref>=0 BEGIN
+				GET_STRREF strref string
+				SPRINT $snd_out("%strref%") "%string%"
+			END
+		END
+	END
+	
+ACTION_SORT_ARRAY_INDICES snd_out NUMERICALLY
+OUTER_SPRINT data ""
+ACTION_PHP_EACH snd_out AS strref=>string BEGIN
+	OUTER_SPRINT data "%data%@%strref%=~%string%~%WNL%"
+END
+
+// bgee - sound names
+
+OUTER_SPRINT name_data "2DA V1.0%WNL%-1%WNL%%TAB%STRREF%TAB%NUM%WNL%"
+COPY_EXISTING - bgee.lua nowhere
+REPLACE_TEXTUALLY "--.*" ""
+REPLACE_EVALUATE "filenames_stringrefs\['\([^']*\)'\] *= *{\([0-9]+\), *\([0-9]+\)}" BEGIN
+		SPRINT name "%MATCH1%"
+		strref="%MATCH2%"
+		TO_UPPER name
+		extra_num="%MATCH3%"
+		SPRINT name_data "%name_data%%name%%TAB%%strref%%TAB%%extra_num%%WNL%"
+		GET_STRREF strref string
+		SPRINT data "%data%@%strref%=~%string%~%WNL%"
+	END
+	""
+// write sound names
+APPEND_OUTER "weidu_external\workspace\copy\sounds\sndname.2da" "%name_data%" KEEP_CRLF
+
+// write tra entries
+APPEND_OUTER "weidu_external\workspace\copy\sounds\sndtra.tra" "%data%" KEEP_CRLF
+
+
+
+>>>>>>>>
+
+<<<<<<<<.../stratagems-inline/sound_compare.lua
+function compareCustomSound(s1, s2)
+	-- DEFAULT, then normal alphabetically, then AoN alphabetically (result must be strictly less than)
+	if (s1.sound == "DEFAULT") then
+		return s2.sound ~= "DEFAULT";
+	elseif (s2.sound == "DEFAULT") then
+		return false;
+	elseif (string.sub(s1.sound, 1, 4) == "BDTP") then
+		if (string.sub(s2.sound, 1, 4) ~= "BDTP") then
+			return false;
+		end
+	elseif (string.sub(s2.sound, 1, 4) == "BDTP") then
+		return true;
+	end
+	return s1.sound < s2.sound;
+end
+>>>>>>>>
+

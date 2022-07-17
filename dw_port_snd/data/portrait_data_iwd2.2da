@@ -1,0 +1,27 @@
+2DA V1.0
+*
+			skin	hair	major	minor	race		sex		
+2fhum2_		20		26		28		41		human		f
+2fhum3_		12		8		15		119		human		f
+2ftif1_		0		26		5		28		human		f
+2maas1_		8		9		53		21		human		m
+2fdef1_		43		0		6		27		elf			f
+2felf1_		20		26		22		72		elf			f
+2felf2_		3		26		6		0		elf			f
+2felf3_		13		4		50		65		elf			f
+2fgnm1_		8		0		54		50		gnome		f
+2mdef1_		43		0		5		63		elf			m
+2mdef2_		43		0		4		72		elf			m
+2mdwf1_		20		26		28		14		dwarf		m
+2melf1_		5		15		90		4		elf			m
+2mgnm1_		8		0		52		53		gnome		m
+2mhum2_		26		15		33		4		human		m
+2mhum3_		20		26		0		27		human		m
+2mhum4_		20		26		26		0		human		m
+2mhum5_		26		8		7		20		human		m
+2mpal1_		12		8		26		0		human		m
+2mdwf2_		20		8		22		73		dwarf		m
+2mhaf1_		20		8		7		23		halfling	m
+2mhum6_		20		8		27		22		human		m
+2mhum7_		13		26		22		7		human		m
+2fhum1_		3		26		28		6		human		f

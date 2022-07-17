@@ -1,0 +1,62 @@
+DEFINE_ACTION_FUNCTION find_external_game
+	STR_VAR game="" // set to 'bgee', 'bg2ee', 'iwdee', 'sod' (only games supported at present)
+			ini=""
+	RET game_loc 
+BEGIN
+
+	ACTION_IF "%ini%" STR_CMP "" BEGIN
+		LAF check_ini INT_VAR silent=1 STR_VAR ini RET game_loc=value END
+		ACTION_IF "%game_loc%" STR_EQ 0 BEGIN
+			OUTER_SPRINT game_loc unspecified
+		END
+	END ELSE BEGIN
+		OUTER_SPRINT game_loc unspecified
+	END	
+	
+	ACTION_IF "%game_loc%" STRING_EQUAL_CASE unspecified BEGIN
+		OUTER_SPRINT extra_check ""
+		ACTION_MATCH "%game%" WITH
+		bgee BEGIN
+			OUTER_SET this_game=0
+		END
+		bg2ee BEGIN
+			OUTER_SET this_game=1
+		END
+		iwdee BEGIN
+			OUTER_SET this_game=2
+		END
+		sod BEGIN
+			OUTER_SET this_game=0
+			OUTER_SPRINT extra_check "siegeofdragonspear.exe"
+		END
+		DEFAULT
+			FAIL "find_external_game: game %game% is not supported"
+		END
+
+
+		OUTER_SET found_game=0
+		GET_DIRECTORY_ARRAY dir_array ".." ".*"
+		OUTER_SET latest_date=0
+		OUTER_SET found_sod=0
+		ACTION_PHP_EACH dir_array AS k=>v BEGIN
+			ACTION_IF (FILE_EXISTS "%v%/engine.lua" && FILE_EXISTS "%v%/build-date.txt" && ("%extra_check%" STR_EQ "" || FILE_EXISTS "%v%/%extra_check%")) BEGIN
+				ACTION_IF FILE_CONTAINS "%v%/engine.lua" "engine_mode *= *%this_game%" BEGIN
+					COPY - "%v%/build-date.txt" nowhere
+						REPLACE_EVALUATE "2\([0-9][0-9][0-9]\)" BEGIN
+							date="%MATCH1%"
+						END
+						""
+						PATCH_IF (date>latest_date) || (date=latest_date && this_game=0 && FILE_EXISTS "%v%/SiegeOfDragonspear.exe") BEGIN
+							latest_date=date
+							SPRINT game_loc "%v%"
+						END 
+				END
+			END
+		END
+		
+	END
+	
+	ACTION_IF "%game_loc%" STR_EQ unspecified BEGIN
+		FAIL "Unable to find the path to your %game% installation. Try setting it manually by putting %ini% equal to it in %MOD_FOLDER%.ini"		
+	END
+END
