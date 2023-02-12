@@ -1,0 +1,191 @@
+DEFINE_ACTION_FUNCTION opcode_wrap 
+	INT_VAR telemetry=0 
+	STR_VAR loc="%MOD_FOLDER%/dw_opcodes" 
+			tra_loc="lang" 
+			tra="dw_opcodes.tra" 
+BEGIN
+
+	// sanity check
+	
+	ACTION_IF !(telemetry=0 || telemetry=1) BEGIN
+		FAIL "opcode_wrap: INT_VAR telemetry must be 1 or 0"
+	END
+
+	// set paths
+	
+
+	// load libraries
+	ACTION_FOR_EACH library IN alter_effect ds indexing_fixes opcode_pass opcode_resources opcode_repeats_shared post_pass BEGIN
+		INCLUDE "%loc%/lib/%library%.tph"
+	END
+	ACTION_IF GAME_IS IWDEE BEGIN
+		OUTER_SPRINT game_lib "%loc%/lib/iwd"
+	END ELSE 
+	ACTION_IF GAME_IS "BGEE BG2EE EET" BEGIN
+		OUTER_SPRINT game_lib "%loc%/lib/bg"
+	END ELSE BEGIN
+		FAIL "Unsupported game type"
+	END
+	ACTION_BASH_FOR "%game_lib%" ".*\.tph" BEGIN
+		INCLUDE "%BASH_FOR_FILESPEC%"
+	END
+	
+	// get needed strings
+	
+	WITH_TRA ".../stratagems-inline/dw_opcodes.tra" "%MOD_FOLDER%/%tra_loc%/english/%tra%" "%MOD_FOLDER%/%tra_loc%/%LANGUAGE%/%tra%" BEGIN
+		OUTER_SET haste_negated_strref=RESOLVE_STR_REF (@700001)
+		OUTER_SET slow_negated_strref=RESOLVE_STR_REF (@700002)
+		OUTER_SPRINT undead_hunter_old_string @700003
+		OUTER_SPRINT undead_hunter_new_string @700004
+	END
+
+	// indexing fixes
+
+	LAF indexing_fixes END
+
+	// run the initialize code contained in opcode_resources
+
+	LAF opcode_fixes_setup STR_VAR loc RET ldi_stat RET_ARRAY ignore_these_resources msectype_array opcode_strrefs opcode_icons opcode_animations opcode_sparkles opcode_glows opcode_removal_map opcode_splstate_map END
+
+
+	// these fixes should be done only once
+
+	ACTION_IF !FILE_EXISTS "weidu_external/markers/dw-opcode_wrap.mrk" BEGIN
+		
+		COPY_EXISTING "misc01.itm" "weidu_external/markers/dw-opcode_wrap.mrk"
+		
+		ACTION_IF GAME_IS IWDEE BEGIN
+			LAF iwd_glows END
+		END
+
+		LAF initial_opcode_fixes STR_VAR loc END
+		LAF cosmetic_opcode_fixes END
+		LAF slow_fixes END
+		LAF opcode_repeats END
+		LAF opcode_repeats_shared END
+		LAF other_fixes END
+		OUTER_SET do_post_pass=1
+
+	END ELSE BEGIN
+		OUTER_SET do_post_pass=0
+	END
+	
+	// main opcode loop (telemetry=1 for debugging)
+
+	LAF opcode_pass INT_VAR telemetry END
+
+	ACTION_IF do_post_pass BEGIN
+	
+		LAF post_pass END
+	
+	END
+
+END
+
+DEFINE_ACTION_FUNCTION opcode_wrap_if_needed
+	INT_VAR telemetry=0 
+			handle_iwd=1
+			component_number_iwd_arcane="-1"
+			component_number_iwd_divine="-1"
+			component_number_iwd_bard="-1"
+	STR_VAR loc="%MOD_FOLDER%/dw_opcodes" 
+			tra_loc="lang" 
+			tra="dw_opcodes.tra" 
+BEGIN
+
+	// sanity check
+	
+	ACTION_IF !(telemetry=0 || telemetry=1) BEGIN
+		FAIL "opcode_wrap_if_needed: INT_VAR telemetry must be 1 or 0"
+	END
+	ACTION_IF !(handle_iwd=0 || handle_iwd=1) BEGIN
+		FAIL "opcode_wrap_if_needed: INT_VAR handle_iwd must be 1 or 0"
+	END
+	// only do anything on EE
+	ACTION_IF GAME_IS "IWDEE BGEE BG2EE EET" BEGIN
+	
+		OUTER_SET proceed=0
+		
+		// check if we've got any IWDspells component installed
+		// (but skip if this is itself an IWDspells component, since
+		// we don't want to have to run 3 times)
+		
+		ACTION_IF 
+			handle_iwd
+			&& (GAME_IS "BGEE BG2EE EET")
+			&& (FILE_EXISTS "weidu_external/markers/dw#iwdspells_arcane.mrk" || FILE_EXISTS "weidu_external/markers/dw#iwdspells_divine.mrk" || FILE_EXISTS "weidu_external/markers/dw#iwdspells_bard.mrk")
+			&& !FILE_EXISTS "weidu_external/markers/dw_opcodes_post_iwd.mrk"
+			&& !(COMPONENT_NUMBER=component_number_iwd_arcane || COMPONENT_NUMBER=component_number_iwd_divine || COMPONENT_NUMBER=component_number_iwd_bard)
+		BEGIN
+			OUTER_SET proceed=1
+			COPY_EXISTING "misc01.itm" "weidu_external/markers/dw_opcodes_post_iwd.mrk"
+		END ELSE
+		ACTION_IF 
+			!FILE_EXISTS "weidu_external/markers/%MOD_FOLDER%_dw_opcodes.mrk"
+			&& !(COMPONENT_NUMBER=component_number_iwd_arcane || COMPONENT_NUMBER=component_number_iwd_divine || COMPONENT_NUMBER=component_number_iwd_bard)
+		BEGIN
+			OUTER_SET proceed=1
+			COPY_EXISTING "misc01.itm" "weidu_external/markers/%MOD_FOLDER%dw_opcodes.mrk"		
+		END
+	
+		ACTION_IF proceed BEGIN
+			LAF opcode_wrap INT_VAR telemetry STR_VAR loc tra_loc tra END
+		END 
+	END
+END	
+			
+			
+			
+/// check if the opcode program is idempotent, i.e. applying it twice has the same effect as applying it once.
+
+DEFINE_ACTION_FUNCTION opcode_idempotency_check BEGIN
+
+	// first run
+	LAF opcode_wrap INT_VAR telemetry=1 END
+	
+	// stash copies
+	MKDIR "weidu_external/workspace/cmp_1"
+	ACTION_BASH_FOR "override" ".*\.\(itm\|spl\)" BEGIN
+		COPY "%BASH_FOR_FILESPEC%" "weidu_external/workspace/cmp_1"
+	END
+	
+	// second run
+	LAF opcode_wrap INT_VAR telemetry=1 END
+
+	// comparison
+	
+	OUTER_SET idem_fail=0
+	ACTION_CLEAR_ARRAY mismatch_array
+	ACTION_BASH_FOR "weidu_external/workspace/cmp_1" ".*" BEGIN
+		COPY - "weidu_external/workspace/cmp_1/%BASH_FOR_FILE%" nowhere
+			READ_ASCII 0x0 data_1 (BUFFER_LENGTH)
+		COPY_EXISTING - "%BASH_FOR_FILE%" nowhere
+			READ_ASCII 0x0 data_2 (BUFFER_LENGTH)
+
+		ACTION_IF "%data_1%" STR_CMP "%data_2%" BEGIN
+			OUTER_SET idem_fail=1
+			OUTER_SPRINT $mismatch_array("%SOURCE_FILE%") ""
+		END
+	END
+	
+	ACTION_IF idem_fail BEGIN
+		PRINT "Idempotency check failed for these resources:"
+		ACTION_PHP_EACH mismatch_array AS k=>discard BEGIN
+			PRINT "%k%"
+		END
+	END ELSE BEGIN
+		PRINT "Idempotency check passed"
+	END
+
+
+
+END
+
+// Hardcoded (English) version of required strings
+
+<<<<<<<<.../stratagems-inline/dw_opcodes.tra
+@700001="Haste negated by Slow"
+@700002="Slow negated by Haste"
+@700003="Immune to hold and level drain" // must exactly match description string for Undead Hunter (strref 25208 in BG2EE)
+@700004="Immune to paralysis and level drain"
+>>>>>>>>

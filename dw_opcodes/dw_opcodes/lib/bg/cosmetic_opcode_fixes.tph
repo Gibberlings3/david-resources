@@ -1,0 +1,1304 @@
+DEFINE_ACTION_FUNCTION cosmetic_opcode_fixes BEGIN
+
+
+	ACTION_IF !FILE_EXISTS "weidu_external/markers/dw-cosmetic_opcode_fixes.mrk" BEGIN // idempotence
+	
+		OUTER_SET is_bg2 = GAME_IS "bg2ee eet"
+		OUTER_SET is_bg = GAME_IS "bgee eet"
+	
+	
+		COPY_EXISTING "misc01.itm" "weidu_external/markers/dw-cosmetic_opcode_fixes.mrk"
+
+		///////////////////////////////////////////////////
+		///
+		/* This first group of opcodes are explicitly cureable, i.e. have opcodes
+		   that remove themselves
+		*/
+		///
+		///////////////////////////////////////////////////
+
+		/////////////////////////////////
+		/*Charm (5)
+		
+		Two main versions:
+		(1) simple charm: applies opcode 5 with type<1000; plays transient (normally dur=3) visual effect SPNWCHRM; applies transient (normally dur=3) color pulse 50 (normally 120/90/30 at cycle speed 25) or color fade 61
+		(2) domination: applies opcode 5 with type>=1000; plays visual effect (normally dur=1) SPNWCHRM; displays string Dominated (8364 in BG2EE); applies color pulse
+		
+		Special case:
+		(3) magic jar: applies opcode 5 wth type >=1000; plays visual effect (dur=3) OHRMJAR; displays string Dominated (8364); applies its own color fade
+		(4) mind flayer control circlet: applies opcode 5 with type>=1000; plays no visual effect; displays the 'charmed' string (14672)
+		
+		RING27/28/29.ITM are the elemental control rings. They use just a 177 application of opcode 5, but it incorporates SPNWCHRM (you can do this on a 177, but it would get cumbersome to do effect immunity/removal that way for spells given variable duration)
+		Since the glow won't really do anything for elementals and (leaving aside weird crossmod edge cases) the icon won't be visible, this suffices, so we don't bother fixing them.
+		Ignore (as scripted effect):
+		- SPWI939.spl (CHARM_HERO)
+		- SPWI996.spl (CHARM_KORAX)
+		- SPIN785.spl (PERM_CHARM)
+		*/
+		//////////////////////////////////////	
+		
+		// charm effects missing their animation
+		
+		ACTION_FOR_EACH resource IN 
+			clck07.itm // Nymph cloak - 'charms creature'
+			spwm179.spl // wild magic charm
+			sw1p01.itm // viper's edge
+		BEGIN
+			COPY_EXISTING "%resource%" override  
+				LPF CLONE_EFFECT INT_VAR match_opcode=5 opcode=215 parameter2=1 duration=3 STR_VAR resource=SPNWCHRM END
+			IF_EXISTS
+		END
+
+		// charm effects missing their glow
+		ACTION_FOR_EACH resource IN
+			clck07.itm   // Nymph cloak - 'charms creature'
+			spcl641.spl  // innate charm animal, possibly unused? 
+			spin785.spl //PERM_CHARM, used by drow in cutscenes - largely to ignore but we might as well get the glow right
+			spin883.spl //VAMPIRE_DOMINATION
+			sw1p01.itm // viper's edge
+		BEGIN
+			COPY_EXISTING "%resource%" override  
+				LPF CLONE_EFFECT INT_VAR match_opcode=5 opcode=50 parameter1=120*0x100 + 90*0x10000 + 30*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END
+			IF_EXISTS
+		END
+
+		// redundant 'charmed' string
+		ACTION_IF is_bg2 BEGIN
+			COPY_EXISTING "spin553.spl" override
+				LPF DELETE_EFFECT INT_VAR match_opcode=139 match_parameter1=14672 END
+		END
+
+
+		// vampire domination is described as 'domination' but uses an opcode that plays the wrong string.
+
+		ACTION_IF is_bg2 BEGIN
+			COPY_EXISTING "spin883.spl" override
+				LPF ALTER_EFFECT INT_VAR match_opcode=5 parameter2=1003 END
+				LPF CLONE_EFFECT INT_VAR match_opcode=5 opcode=139 timing=1 duration=0 parameter2=0 parameter1=8364 END
+		END
+		
+		// in BG (only) Algernon's cloak has a Charm Person ability, which lacks a glow. (silent=1 because I'm not sure which version EET uses)
+		// also in BGEE, SPIN558 lacks a glow (it has one in BG2EE) and has an unnecessary icon
+		
+		ACTION_IF is_bg BEGIN
+			COPY_EXISTING "clck08.itm" override  
+				LPF CLONE_EFFECT INT_VAR silent=1 match_opcode=5 opcode=50 parameter1=120*0x100 + 90*0x10000 + 30*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END
+			IF_EXISTS		
+			COPY_EXISTING "spin558.spl" override  
+				LPF DELETE_EFFECT INT_VAR match_opcode=50 END
+				LPF DELETE_EFFECT INT_VAR match_opcode=142 END
+				LPF CLONE_EFFECT INT_VAR silent=1 match_opcode=5 opcode=50 parameter1=120*0x100 + 90*0x10000 + 30*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END
+			IF_EXISTS	
+		END
+
+
+
+		/////////////////////////////////////////////////////////////////////////
+		/* Haste (16)
+		Standard version: applies opcode 16; displays string 14023 ('hasted'); plays lighting effect 141 (normally alteration air); applies glow (normally 60/60/120, opcode 61, cycle time 25
+		
+			Ignore:
+			- SPIN572.spl (CUTSCENE_HASTE)
+			- SPIN584.spl (GAIN_HASTE_TEMPORARY - apparently unused)
+			- runrun.spl,bdrunrun.spl (used to speed NPCs up)
+			- CUTHIDE.spl (some sort of CS effect)
+		
+		*/
+		///////////////////////////////////////////////////////////////////////////
+
+		// haste effects missing their sparkle
+		
+		ACTION_FOR_EACH resource IN
+			ring39.itm // ring of Gaxx
+			miscbc.itm // Blackrazor
+			spwm115.spl // wild magic haste
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=16 opcode=141 timing=1 duration=0 parameter1=0 parameter2=4 END
+			IF_EXISTS
+		END
+		
+		// haste effects missing their glow
+		
+		ACTION_FOR_EACH resource IN
+			ring39.itm //ring of Gaxx
+			miscbc.itm // Blackrazor
+			spwm115.spl // wild magic haste
+			bdcrimsn.spl // ?? SoD effect
+			bdfleshr.spl // ?? SoD effect
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=16 opcode=61 parameter1=60*0x100 + 60*0x10000 + 120*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END
+			IF_EXISTS
+		END
+		
+		// haste effects missing the 'hasted' string
+		
+		OUTER_SET haste_strref=is_bg2?14023:(is_bg?26019:0)
+		ACTION_FOR_EACH resource IN
+			ring39.itm //ring of Gaxx
+			miscbc.itm // Blackrazor
+			spwi711.spl // Sphere of Chaos
+			spwm115.spl // wild magic haste	
+			spin978.spl // golem haste
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=16 opcode=139 parameter1=haste_strref parameter2=0 duration=0 timing=1 END
+			IF_EXISTS
+		END
+		
+		// the Wand of Wonder is missing all its haste cosmetics (it's wand12; in SoD/BGEE that's a wand of MM)
+		
+		ACTION_IF is_bg2 BEGIN
+			COPY_EXISTING "wand12.itm" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=16 opcode=141 timing=1 duration=0 parameter1=0 parameter2=4 END
+				LPF CLONE_EFFECT INT_VAR match_opcode=16 opcode=61 parameter1=60*0x100 + 60*0x10000 + 120*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END
+				LPF CLONE_EFFECT INT_VAR match_opcode=16 opcode=139 parameter1=14023 parameter2=0 duration=0 timing=1 END
+		END
+
+
+		////////////////////////////////////////////////////////////////////////
+		/*
+		Invisibility (20)
+		
+		Standard version: applies opcode 20; displays string 14020 or 14773 (or on BGEE, 31747) ('invisible'), color glow (normally 61, 90/30/90, sparkle (normally illusion air)
+		
+		Exceptions for spells with different names: BALTH10, BDDDOORX, SPCL938, SPCL940, SPWI505, SPWI607, SPWI927
+		Many more exceptions in BGEE 
+		
+		Skip spin672.spl (QUICK_INVISIBLE) as scripted spell
+		
+		*/
+		////////////////////////////////////////////////////////////////////////
+
+		// invisibility effects lacking sparkle
+		
+		ACTION_FOR_EACH resource IN
+			dagg21.itm // dagger of the stars (x2) - 'makes user go invisible'
+			dagg22.itm
+			ring05.itm // Sandthief's ring - 'invisibility once per day'
+			ring39.itm // Ring of Gaxx - 'invisibility once per day'
+			ring42.itm // Specter's RIng - 'improved invisibility once per day'
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=20 opcode=141 timing=1 duration=0 parameter1=0 parameter2=16 END	
+			IF_EXISTS
+		END
+
+		// invisibility effects lacking color glow
+		
+		ACTION_FOR_EACH resource IN
+			dagg21.itm // dagger of the stars (x2) - 'makes user go invisible'
+			dagg22.itm
+			ring05.itm // Sandthief's ring - 'invisibility once per day'
+			ring39.itm // Ring of Gaxx - 'invisibility once per day'
+			ring42.itm // Specter's RIng - 'improved invisibility once per day'
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=20 opcode=61 parameter1=90*0x100 + 30*0x10000 + 90*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END	
+			IF_EXISTS
+		END
+
+		// invisibility effects lacking 'invisible' string
+		
+		ACTION_FOR_EACH resource IN
+			dagg21.itm // dagger of the stars (x2) - 'makes user go invisible'
+			dagg22.itm
+			ring05.itm // Sandthief's ring - 'invisibility once per day'
+			ring39.itm // Ring of Gaxx - 'invisibility once per day'
+			ring42.itm // Specter's RIng - 'improved invisibility once per day'
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=20 opcode=139 parameter1=14020 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS
+		END
+
+
+
+
+		//////////////////////////////////////////////////////////////////////////////////////
+		/* Panic (24)
+		
+		The icon is clearly standard.
+		The 'mindat' animation (played through cdhorror.vvc) is *not* standard: only Horror and a couple of BD additions have it
+		Glows are highly variable
+		TBH the 'panic' string is only sporadically used, but there is a strong general presumption that effects ought to be textually
+		announced so we'll do it	
+		The Helm of the Rock uses the Morale Failure string (14134) instead
+		Occasionally fear is associated with a THAC0 reduction (54) or morale break (106)
+		
+		Skip 'bdpanic' (used in CSs)
+		*/
+		///////////////////////////////////////////////////////////////////////////////////////
+
+		// panic effects lacking 'panic' string
+
+		ACTION_FOR_EACH resource IN
+			B1-12M4.ITM //Balor attack
+			BDSHA01C.SPL
+			BEARSPIR.ITM // spirit bear weapons
+			SPBATT1.ITM
+			SPBATT2.ITM
+			SPBATT3.ITM
+			SPBATT4.ITM
+			SPBATT5.ITM
+			MISTHO.ITM  //mist horror attack
+			MISTICE.ITM //ice mist attack
+			RODMACE.ITM //Mace from Rod of Lordly Might
+			RODS05.ITM // Rod of Terror
+			SPCL908.SPL //War Cry
+			SPIN536.SPL //Lich fear
+			SPIN559.SPL //Burning man keening
+			SPIN675.SPL //Wandering horror
+			SPIN772.SPL //Hell fear
+			SPIN807.SPL //Slayer fear
+			SPIN882.SPL //Vampire fear
+			SPIN890.SPL //Demon fear
+			SPIN895.SPL //Dragon fear
+			SPIN921.SPL // 'Deathsong' - apparently unused
+			SPPR416.SPL //Cloak of Fear
+			SPIN203.SPL
+			SPPR517.SPL // Fear effect from Insect Plague
+			SPPR706.SPL //Symbol: Fear
+			SPWI811.SPL
+			SPWI899.SPL
+			SPWI956.SPL
+			SPWM123.SPL //wild magic fear
+			WAND02.ITM // wand of fear
+			BDDRAGG2.SPL // SoD dragonfear
+			BDPOTN01.ITM // potion of terror
+			BDFEYRWP.ITM // Feyr attack
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=24 opcode=139 parameter1=14007 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS
+		END
+		
+		// panic effects missing an icon
+		
+		ACTION_FOR_EACH resource IN
+			B1-12M4.ITM // Balor attack
+			RODMACE.ITM // Mace from Rod of Lordly Might
+			BEARSPIR.ITM //Spirit bear weapons
+			SPBATT1.ITM
+			SPBATT2.ITM
+			SPBATT3.ITM
+			SPBATT4.ITM
+			SPBATT5.ITM
+			SPIN921.SPL // 'Deathsong' - apparently unused
+			SPPR517.SPL // Fear effect from Insect Plague
+			BDFEYRWP.ITM // Feyr attack
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=24 opcode=142 parameter1=0 parameter2=36 END	
+			IF_EXISTS
+		END
+
+
+		
+		////////////////////////////////////////////////////
+		/*
+		Poison (25)
+		Nothing to do here - there is normally no string displayed
+		and the icon is built into the opcode (at least on EE)
+		*/
+		//////////////////////////////////////////////////////
+
+		////////////////////////////////////////////////////
+		/*
+		Silence (38)
+		
+		Silence effect; glow (normally 61 at 60/60/120, cycle speed 25); string 'silenced'; silence icon
+		
+		*/
+		//////////////////////////////////////////////////////
+
+		// glow missing on silence
+		
+		ACTION_FOR_EACH resource IN
+			MISC3L.ITM // horn of silence
+			SPIN998.SPL //TANARI_SILENCE
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=38 opcode=61 parameter1=60*0x100 + 60*0x10000 + 120*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END	
+			IF_EXISTS
+		END
+
+
+
+		//////////////////////////////////////////////////////////////////////////
+		//
+		/*
+		Sleep (39)
+
+		39 is *heavily* overloaded. It's used for:
+
+		- being put to sleep (example: Sleep, SPWI116.SPL) - should display 'sleep' icon and show 'sleep' string
+		- being rendered unconscious (example: Color Spray, SPWI105.SPL) - functionally equivalent to sleep, so best to dress the same way
+		- being rendered hopeless (example: Emotion:Hopelessness, SPWI411.SPL) - displays hopelessness icon, provides immunity to fear
+		- being nauseated (example: Stinking Cloud, SPWI213.SPL) - should display 'nauseated' icon
+		- being momentarily knocked down by a Wing Buffet effect (example: Wing Buffet, SPIN695.SPL) - displayed no icon in oBG2, BG2EE gives the 'sleep' icon but I think that's
+		  misleading. Of the available options the best choice is 'unconscious' (130)
+		- being 'knocked back and stunned' (example: the Staff of the Ram, STAF21.ITM) - in EE, may as well be treated as a differently-shown stun, so use the 'stun' string and play the
+		  'stun' icon. Also is called out as not affecting large creatures, but this is not really implemented. Despite being described as 'stun' in the text I think this is best conceptualized
+		  as 'unconscious', given the string issue.
+		- falling to the ground during an earthquake (example: Earthquake, SPPR720.SPL) - awkward but I think 'unconscious' is the best fit; also needs to be externalized for later use.
+		- being pinned (specific to Ixil's Spike, SPER12.ITM) - likewise. 
+
+		In addition (regrettably, in my view) opcode 39 plays the 'unconscious' string automatically.
+
+		*/
+		/////////////////////////////////////////////////////////////////////////
+
+		////////////////////////////
+		// Start with special cases
+		////////////////////////////
+
+		ACTION_IF is_bg2 BEGIN
+
+
+			// Ixil's spike
+			
+			CREATE spl DW-IXIL
+				INSERT_BYTES 0x72 0x28
+				WRITE_BYTE 0x72+0xc 2 // target
+				WRITE_SHORT 0x72+0x10 1 // min level
+				WRITE_SHORT 0x68 1
+				WRITE_LONG 0x6a (0x28+THIS)
+				LPF ADD_SPELL_EFFECT INT_VAR opcode=39 target=2 parameter2=1 duration=18 special=130 END
+			
+			COPY_EXISTING SPER12.ITM override
+				LPF ALTER_EFFECT INT_VAR match_opcode=39 opcode=146 timing=1 duration=0 parameter1=1 parameter2=1 special=0 STR_VAR resource=DW-IXIL END
+
+			// Earthquake
+			
+			CREATE spl DW-QUAKE
+				INSERT_BYTES 0x72 0x28
+				WRITE_BYTE 0x72+0xc 2 // target
+				WRITE_SHORT 0x72+0x10 1 // min level
+				WRITE_SHORT 0x68 1
+				WRITE_LONG 0x6a (0x28+THIS)
+				LPF ADD_SPELL_EFFECT INT_VAR opcode=39 target=2 parameter2=1 duration=24 special=130 END
+
+			ACTION_FOR_EACH spell IN ohbquake sppr720 spogre01 BEGIN
+				COPY_EXISTING "%spell%.spl" override
+					LPF ALTER_EFFECT INT_VAR match_opcode=39 opcode=146 timing=1 duration=0 parameter1=1 parameter2=1 special=0 STR_VAR resource=DW-QUAKE END
+			END
+
+			////////////////////////////
+			// Knock back and stun
+			////////////////////////////
+
+			// staff of the ram
+
+			ACTION_FOR_EACH resource IN
+				STAF21.ITM // staff of the ram +4
+				STAF22.ITM // staff of the ram +6
+			BEGIN
+				COPY_EXISTING "%resource%" override
+					LPF CLONE_EFFECT INT_VAR match_opcode=235 opcode=324 parameter1=0 parameter2=13 duration=1 STR_VAR insert=first resource="%SOURCE_RES%" END // immunity for large creatures
+					LPF ALTER_EFFECT INT_VAR match_opcode=39 special=130 END // sleep with unconscious icon
+			END
+			// Smite HLA
+			
+			// start by consolidating the various hit effects into one spell
+
+			CREATE spl DW-SMITE
+				INSERT_BYTES 0x72 0x28
+				WRITE_BYTE 0x72+0xc 2 // target
+				WRITE_SHORT 0x72+0x10 1 // min level
+				WRITE_SHORT 0x68 1
+				WRITE_LONG 0x6a (0x28+THIS)
+				LPF ADD_SPELL_EFFECT INT_VAR opcode=324 target=2 parameter2=13 duration=1 END // immunity for large creatures		
+				LPF ADD_SPELL_EFFECT INT_VAR opcode=235 target=2 parameter1=30 parameter2=2 duration=2 END // knockback
+				LPF ADD_SPELL_EFFECT INT_VAR opcode=39 target=2 duration=6 parameter2=1 special=130 END // sleep, with unconscious icon
+
+			// apply it as the only on-hit effect
+			
+			COPY_EXISTING "SPCL909A.EFF" override
+				WRITE_LONG 0x10 146  // cast spell
+				WRITE_LONG 0x1c 1	 // parameter1=1
+				WRITE_LONG 0x20 1	 // parameter2=1
+				WRITE_LONG 0x28 0	 // duration=0
+				WRITE_LONG 0x24 1	 // timing=1
+				WRITE_ASCII 0x30 "DW-SMITE" // payload
+				
+			COPY_EXISTING "SPCL909.SPL" override
+				LPF DELETE_EFFECT STR_VAR match_resource=SPCL909B END
+				LPF DELETE_EFFECT STR_VAR match_resource=SPCL909C END
+
+		END // end of BG2-only bit
+
+		////////////////////////////
+		// Momentary knockback from 235
+		////////////////////////////
+
+		// all these effects need to use the Unconsciousness icon, not the Sleep icon
+		
+		ACTION_FOR_EACH resource IN
+			ABZAWAY.SPL
+			AURSTAF.ITM	
+			AX1H16.ITM
+			BALTH01.SPL
+			BALTH09.SPL
+			CH3AWAY.SPL
+			DGWHIRL.SPL
+			JWWHIRL.SPL
+			OHBBCLT0.SPL
+			RAVAG01.ITM
+			SPCL911B.SPL
+			SPIN547.SPL
+			SPIN643.SPL
+			SPIN658.SPL
+			SPIN695.SPL
+			SPWI922.SPL
+			SPWISH27.SPL
+			SPYANC01.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF ALTER_EFFECT INT_VAR match_opcode=39 special=130 END
+			IF_EXISTS
+		END
+
+
+
+		////////////////////////////////////////////////////
+		/*
+		Slow (40)
+		
+		Slow has a built-in icon, but needs to display the string 'slowed' (335/14668) or 'slow' (14000) (we default to 14668)	
+		
+		One variant is the Kuo-Toa spear, which has a grease overlay (opcode 158)
+		*/
+		//////////////////////////////////////////////////////
+			
+		// slow effects with missing string
+		
+		ACTION_FOR_EACH resource IN
+			ACIDOOZ3.ITM //possibly-unused ooze attack
+			AURSTAF.ITM // Aurumach attack
+			BALTH07.SPL // Balthazar's malison/slow effect
+			BHAAL2B.SPL // Bhaalspawn dark taint
+			BONEDAG.ITM // Bone Blade weapon
+			DOGWAWP.ITM // Astral Hound bite
+			DWWHIP.ITM  // drow whip of fangs
+			DWWHIP01.ITM // drow whip of fangs
+			GORWOM4.ITM // drow whip of fangs
+			HGBER01.ITM // Berenn sword
+			JELLMU1.ITM // Jelly attack
+			JELLMU2.ITM // Jelly attack
+			KUOSPER.ITM // Kuo-toa spear
+			MELIS01.SPL // Melissan's bone blades
+			PLYJELLO.ITM // Jelly attack
+			PLYJELLY.ITM // jelly attack
+			SENDAI.ITM // drow whip of fangs
+			SHARSWD.ITM // Xei Win Toh's weapon
+			SPCL415.SPL // trap
+			SPERMEL.ITM // Melissan's attack
+			SPIN575.SPL // vortex web
+			SPIN977.SPL // Golem slow	
+			SPWM112.SPL // wild magic effect
+			TROLLTOR.ITM // Torgal
+			BDTR01.SPL // ?? SoD effect
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=40 opcode=139 timing=1 duration=0 parameter1=14668 parameter2=0 END
+			IF_EXISTS
+		
+		END
+
+		// for holy word/unholy word, we'll hijack the redundant 'iconslow' effect slot
+		
+		COPY_EXISTING "STUNSTRG.EFF" "override/DWSLOWST.EFF"
+			WRITE_LONG 0x1c 14668
+		
+		ACTION_FOR_EACH resource IN SPPR710.SPL SPPR715.SPL BEGIN
+			COPY_EXISTING "%resource%" override
+				REPLACE_TEXTUALLY ICONSLOW DWSLOWST
+		END
+
+
+
+
+		////////////////////////////////////////////////////
+		/*
+		Stun (45)
+		
+		The only consistent thing is the opcode itself (which imposes the icon) and either the 'stunned' (1280) or 'stun' (14043) string
+		
+		*/
+		//////////////////////////////////////////////////////
+
+		// for holy word/unholy word, we'll hijack the redundant 'iconstun' effect slot
+		
+		ACTION_FOR_EACH resource IN SPPR710.SPL SPPR715.SPL BEGIN
+			COPY_EXISTING "%resource%" override
+				REPLACE_TEXTUALLY ICONSTUN STUNSTRG
+		END
+
+		////////////////////////////////////////////////////
+		/*
+		Blindness (74)
+		
+		
+		the default is: Applies opcode; displays string 'blinded' (14674); plays sparkle (illusion earth); plays glow (usually 61;90/30/90)
+		but I think there is lots of heterogeneity here, for good reason. The only core is the string (given the opcode auto-enforces the icon)
+		
+		*/
+		//////////////////////////////////////////////////////
+
+		////////////////////////////////////////////////////
+		/*
+		Feeblemind (76)
+		
+		Feeblemind consistently applies the opcode and icon 48.
+		The 'feebleminded' string exists in the game (23744) but is unused. I *think* this should be interpreted as error, so we add it.
+		
+		It mostly uses the SPMINDAT animation. There is an oddity in the Feeblemind spell where it only plays for 2 secs, but I think that's a bug?
+		*/
+		//////////////////////////////////////////////////////
+
+		// feeblemind effects missing string
+		
+		ACTION_FOR_EACH resource IN
+			INSANITY.SPL
+			SCRL18.ITM
+			SIRINE.ITM
+			SPPR650.SPL
+			SPWI509.SPL
+			SPWI714.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=76 opcode=139 parameter1=23744 parameter2=0 duration=0 timing=1 END
+			IF_EXISTS
+		END
+		
+		// feeblemind effect missing (or with malformed) animation
+		
+		ACTION_FOR_EACH resource IN
+			SPWI509.SPL
+			SIRINE.ITM
+			SPWI714.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF DELETE_EFFECT STR_VAR match_resource=SPMINDAT END
+				LPF CLONE_EFFECT INT_VAR match_opcode=76 opcode=215 parameter1=0 parameter2=1 STR_VAR resource=SPMINDAT END
+			IF_EXISTS
+		
+		END
+
+		// both missing here but only in BG
+
+		ACTION_IF is_bg BEGIN
+			COPY_EXISTING "sirine1.itm" override
+				LPF DELETE_EFFECT INT_VAR match_opcode=139 match_parameter1=23744 END
+				LPF CLONE_EFFECT INT_VAR silent=1 match_opcode=76 opcode=139 parameter1=23744 parameter2=0 duration=0 timing=1 END
+				LPF DELETE_EFFECT INT_VAR match_opcode=215 END
+				LPF CLONE_EFFECT INT_VAR match_opcode=76 opcode=215 parameter1=0 parameter2=1 STR_VAR resource=SPMINDAT END
+		END
+		
+
+
+
+
+		////////////////////////////////////////////////////
+		/*
+		Disease (78)
+		
+		Disease only comes with an icon (imposed via the opcode on EE) 
+		*/
+		//////////////////////////////////////////////////////
+
+		////////////////////////////////////////////////////
+		/*
+		Deafness (80)
+		
+		Deafness only comes with an icon (imposed separately).
+		It DOESN'T come with a string 'deafened', which really it ought
+		to, but that's probably a bridge too far.
+		*/
+		//////////////////////////////////////////////////////
+
+		////////////////////////////////////////////////////
+		/*
+		Paralysis (109)
+		
+		Should come with a string ('paralyzed'), an icon (originally 13, but changed to 214 by me), a sparkle (by default Necrmancy earth (1)) and a glow (by default opcode 50, 87/57/0, cycle speed 25)
+		*/
+		//////////////////////////////////////////////////////
+
+		// paralyzation effects missing string
+		
+		ACTION_FOR_EACH resource IN
+			BASILG1.ITM
+			BDCCRAW1.ITM
+			BDGHASTG.ITM
+			BDWOLFVA.ITM
+			BASILL1.ITM
+			CARRIO1.ITM
+			DAGG17.ITM
+			DEMMAU01.ITM
+			GHAST1.ITM
+			GHOUL1.ITM
+			GHOULLOR.ITM
+			KALDW1.ITM
+			LACEDO.ITM
+			LACEDO02.ITM
+			LICH02.ITM
+			OHBDAGG1.ITM
+			OHBENVLP.SPL
+			PARABASI.ITM
+			REVENT1.ITM
+			RODSWORD.ITM
+			SPIN776.SPL
+			SPIN863.SPL
+			SPIN914.SPL
+			SPIN960.SPL
+			SPWATT2.ITM
+			SPWATT3.ITM
+			SPWATT4.ITM
+			SPWATT5.ITM
+			SPWI711.SPL
+			VAMPIRE.ITM
+			WOLFVA1.ITM
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=109 opcode=139 parameter1=14650 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS				
+		END
+		
+		// paralyzation effects with the wrong string ('held')
+		
+		COPY_EXISTING "bdbonbat.itm" override
+			LPF ALTER_EFFECT INT_VAR match_opcode=139 parameter1=14650 END
+		IF_EXISTS
+
+		// paralyzation effects missing icon
+
+		// firstly work out what icon we're using for paralysis
+
+		COPY_EXISTING - "ghoul1.itm" nowhere
+			icon=13
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF ab_ind=0 BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						PATCH_IF SHORT_AT fx_off=142 BEGIN
+							READ_LONG (fx_off+0x8) icon
+						END
+					END			
+				END
+			END
+		
+		
+		ACTION_FOR_EACH resource IN
+			BASILG1.ITM
+			BASILL1.ITM
+			PARABASI.ITM
+			RODSWORD.ITM
+			SPIN776.SPL
+			SPIN863.SPL
+			SPIN960.SPL
+			SPWATT2.ITM
+			SPWATT3.ITM
+			SPWATT4.ITM
+			SPWATT5.ITM
+			SPWI711.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=109 opcode=142 parameter2=icon END
+			IF_EXISTS					
+		END
+
+		
+		// paralyzation effects missing glow
+		
+		ACTION_FOR_EACH resource IN
+			BASILG1.ITM
+			BASILL1.ITM
+			DAGG17.ITM
+			OHBDAGG1.ITM
+			PARABASI.ITM
+			RODSWORD.ITM
+			SPIN776.SPL
+			SPIN863.SPL
+			SPIN914.SPL
+			SPIN960.SPL
+			VAMPIRE.ITM
+			
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=109 opcode=50 parameter1=87*0x100 + 57*0x10000 + 0*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END
+			IF_EXISTS	
+		END
+		
+		// paralyzation effects missing sparkle
+		
+		ACTION_FOR_EACH resource IN
+			DAGG17.ITM
+			KALDW1.ITM
+			OHBDAGG1.ITM
+			OHBENVLP.SPL
+			RODSWORD.ITM
+			SPIN776.SPL
+			SPIN863.SPL
+			SPIN960.SPL
+			VAMPIRE.ITM
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=109 opcode=141 timing=1 duration=0 parameter1=0 parameter2=1 END	
+			IF_EXISTS
+		END
+		
+		
+
+		////////////////////////////////////////////////////
+		/*
+		Confusion (128)
+		
+		1) 'Confusion' - opcode, icon 3 ('confused'), display string 14782 ('confused'), play persistent animation spconfus, do a color fade (usually 61, 120/90/30)
+		2) 'Chaos' - same, but icon 47 ('chaos')
+		3) 'Rigid thinking' opcode icon 2 ('rigid thinking'), string 14791 ('rigid thinking'), glow, but no animation
+		*/
+		//////////////////////////////////////////////////////
+		
+		// confusion effects missing string
+		
+		ACTION_FOR_EACH resource IN
+			SPIN582.SPL // no-save confusion from Machine of Lum the Mad
+			SPWI711.SPL // sphere of chaos
+			MISC3M.ITM // Harp of Discord
+			SIRINE1.ITM // Sirine attack
+			WA2HARP.ITM //Harp of pandemonium
+			WAS2H.ITM //Joril's dagger
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=128 opcode=139 parameter1=14782 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS	
+		END
+
+		COPY_EXISTING "SPCL751A.SPL" override
+			LPF CLONE_EFFECT INT_VAR header=2 match_opcode=128 opcode=139 parameter1=37604 parameter2=0 duration=0 timing=1 END		
+		
+		COPY_EXISTING cdheld.eff "override/dwdawns.eff"
+			WRITE_LONG 0x1c 14782
+		COPY_EXISTING "sppr609.spl" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=177 STR_VAR resource=DWDAWNS match_resource=DAWNCON END
+		IF_EXISTS
+		
+		// confusion effects missing icon
+
+		ACTION_FOR_EACH resource IN
+			SPWI711.SPL // sphere of chaos
+			SPCL751A.SPL //Jester music
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=128 opcode=142 parameter1=0 parameter2=3 END			
+			IF_EXISTS
+		END
+		
+		// confusion effects missing animation
+		
+		ACTION_FOR_EACH resource IN
+			SPIN582.SPL // no-save confusion from Machine of Lum the Mad
+			SPWI711.SPL // sphere of chaos
+			SIRINE1.ITM // sirine attack
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=128 opcode=215 parameter1=0 parameter2=1 STR_VAR resource=SPCONFUS END	
+			IF_EXISTS
+		END	
+		
+		// confusion effects missing glow
+		
+		ACTION_FOR_EACH resource IN
+			SPIN582.SPL // no-save confusion from Machine of Lum the Mad
+			MISC3M.ITM //Harp of Discord
+			SIRINE1.ITM //Sirine attack
+			WAS2H.ITM //Joril's dagger
+			SPCL751A.SPL //Jester music
+			SPIN502.SPL // Id insinuation
+			BDAX1H05.SPL // grubdoubler's axe
+			BDSHA01A.SPL // SoD ??
+			BDSTINK.SPL // SoD ??
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=128 opcode=61 parameter1=120*0x100 + 90*0x10000 + 30*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END	
+			IF_EXISTS
+		END
+		
+		// Harp of Discord has the Intoxicated animation, not the Confused one
+		
+		COPY_EXISTING "misc3m.itm" override
+			LPF ALTER_EFFECT INT_VAR match_opcode=142 parameter2=3 END
+		IF_EXISTS
+
+
+
+		////////////////////////////////////////////////////
+		/*
+		Hold (175)
+		
+		Hold has most of its effects, including a glow, an icon, and the 'held' string, internalized.
+		But it needs to come with animation 'SPMINDAT' (or, occasionally, the undead clone, SPUNHVIS)
+		
+		There is one variant: OHNWAND1.SPL, the payload of the Wand of Whips. This uses a different set of animations.
+		*/
+		//////////////////////////////////////////////////////
+		
+		// hold effects missing animation
+		
+		ACTION_FOR_EACH resource IN
+			SPWM114.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR silent=1 match_opcode=175 opcode=215 parameter1=0 parameter2=1 STR_VAR resource=SPMINDAT END
+			IF_EXISTS
+		END		
+
+		////////////////////////////////////////////////////
+		/*
+		Energy drain (216)
+		
+		Energy drain provides (a) the opcode; (b) a string (N levels drained - variously 41495, 40968, 40969, 40979, 41616);
+		(c) a 141 sparkle (normally necromancy earth,1); (d) a glow (usually 61, 60/90/120, speed 25); (d) an icon
+		*/
+		//////////////////////////////////////////////////////
+
+		// energy drain effects missing string
+
+		// 1 level drained
+		ACTION_FOR_EACH resource IN
+			DOGWAWP.ITM
+			MISTVA.ITM
+			SPWATT5.ITM
+			WOLFSPIR.ITM
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=216 opcode=139 parameter1=41495 parameter2=0 duration=0 timing=1 END
+			IF_EXISTS
+		END
+
+		// 2 levels drained
+		ACTION_FOR_EACH resource IN
+			DEMOGORG.ITM
+			SW2HDEAT.ITM
+			SPIN666.SPL
+			SPWI914.SPL
+			SPWISH19.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=216 opcode=139 parameter1=40968 parameter2=0 duration=0 timing=1 END
+			IF_EXISTS
+		END
+		
+		// 4 levels drained
+		
+		ACTION_FOR_EACH resource IN
+			SPIN571.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=216 opcode=139 parameter1=40979 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS
+		END	
+
+		// 5 levels drained
+		
+		ACTION_FOR_EACH resource IN
+			SPIN587.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=216 opcode=139 parameter1=41616 parameter2=0 duration=0 timing=1 END
+			IF_EXISTS
+		END	
+		
+		// energy drain missing sparkle
+		
+		ACTION_FOR_EACH resource IN
+			DEMOGORG.ITM
+			DOGWAWP.ITM
+			MINDFL02.ITM
+			SPIN586.SPL
+			SPIN587.SPL
+			SW2H18.ITM
+			SW2HDEAT.ITM
+			WOLFSPIR.ITM
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=216 opcode=141 timing=1 duration=0 parameter1=0 parameter2=1 END
+			IF_EXISTS
+		END
+		
+		// energy drain missing glow
+		ACTION_FOR_EACH resource IN
+			BODHI.ITM
+			DAGG20.ITM
+			DEMOGORG.ITM
+			DOGWAWP.ITM
+			HGWRA01.ITM
+			MINDFL02.ITM
+			MISTVA.ITM
+			MISTVA2.ITM
+			OHHWRSW.ITM
+			SLAYSH01.ITM
+			SPECTR.ITM
+			SPIN586.SPL
+			SPIN587.SPL
+			SW1H59.ITM
+			SW2H18.ITM
+			SW2HDEAT.ITM
+			TELSLAV.ITM
+			TELWRAI.ITM
+			WIGHT.ITM
+			WOLFSPIR.ITM
+			WRAITH1.ITM
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=216 opcode=61 parameter1=60*0x100 + 90*0x10000 + 120*0x1000000 parameter2=25*0x10000 duration=0 timing=1 END	
+			IF_EXISTS
+		END
+
+
+	/////////////////////////////////////////////////////////
+	//////////////////////////////////////////////////////////
+	//
+	/*
+	These opcodes cannot be removed. I focus just on their deleterious
+	versions.
+	*/
+	///////////////////////////////////////////////////////////
+
+	/////////////////////////////////////////////////////////////
+	/*
+	Ability drain (lumped together): Charisma (6), Constitution (10), Dexterity (15), Intelligence (19), Strength (44), Wisdom (49)
+
+	In drain mode, the default version is 
+	(1) opcode; 'ability score drained' icon (91); displayed string '[Ability] modification': STR (14042) INT (14021) WIS (14047) DEX (14024) CON (14029) CHA (14034)
+	(the string is only haphazardly used but I think the general design principles support rolling it out)
+	There are several alternatives:
+	(2) Mind flayer drain. opcode; 'intelligence drained by mind flayer' icon (86); displayed string 'Devour Brain' (32089)
+	(3) BG energy drain (as per Kirinhale): applies 'energy drain' icon and reduces abilities and saves - probably best left alone
+	(4) Pain (from Chromatic Orb and Symbol of Pain), which is a slightly awkward special case. Absent appropriate icons/strings, leave alone.
+	(5) Enfeeblement: opcode, string 'enfeebled', icon 113
+	(6) a bunch of curses, which use the opcode, dispay 'you have been cursed with WHATEVER', and should (but don't) apply the ability drain icon
+
+	These are skipped (as scripted effects)
+
+		SPIN919.SPL (JAHEIRA_WEAKNESS)
+		SPIN808.SPL (DRAIN_PARTY)
+		SPIN817.SPL (C6BODHI_WEAKNESS)
+		
+	We also skip various items that increase some ability scores and decrease others:
+	OHNPOTN1.ITM, POTN15.ITM, POTN16.ITM, POTN46.ITM
+	*/
+	///////////////////////////////////////////////////////////////
+
+		// missing icons - ability drain
+
+		//str
+		ACTION_FOR_EACH resource IN
+			DWWHIP.ITM
+			DWWHIP01.ITM
+			SCHLUM1.ITM
+			SCRL10.ITM
+			SENDAI.ITM
+			SPWM118.SPL
+			SPWISH41.SPL
+			bdsw1h19.itm
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=44 opcode=142 parameter1=0 parameter2=91 END	
+			IF_EXISTS
+		END
+		
+		//dex
+		ACTION_FOR_EACH resource IN
+			BONEDAG.ITM 
+			HAUNT1.ITM
+			KIEL1.ITM
+			HGBER01.ITM
+			DEMSUC01.ITM
+			GORWOM1.ITM
+			HGWRA01.ITM
+			ICETRL.ITM
+			QUASCLAW.ITM
+			SCRL11.ITM
+			MELIS01.SPL
+			OHDEVIL.SPL
+			SPWISH44.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=15 opcode=142 parameter1=0 parameter2=91 END	
+			IF_EXISTS
+		END
+
+		//con
+		ACTION_FOR_EACH resource IN
+			SPWISH43.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=10 opcode=142 parameter1=0 parameter2=91 END		
+			IF_EXISTS
+		END
+		// special case for probability reasons
+		COPY_EXISTING OHHDRAI2.SPL override
+				LPF CLONE_EFFECT INT_VAR multi_match=1 match_opcode=10 opcode=142 parameter1=0 parameter2=91 probability1=100 probability2=0 END
+		IF_EXISTS
+
+		//int
+		ACTION_FOR_EACH resource IN
+			SIRINE1.ITM
+			SCRL18.ITM
+			SPWISH45.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR silent=1 match_opcode=19 opcode=142 parameter1=0 parameter2=91 END		
+			IF_EXISTS
+		END
+
+		//wis
+		ACTION_FOR_EACH resource IN
+			SCRL12.ITM
+			SPWISH42.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=49 opcode=142 parameter1=0 parameter2=91 END		
+			IF_EXISTS
+		END
+
+		//cha
+		ACTION_FOR_EACH resource IN
+			SCRL13.ITM
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=6 opcode=142 parameter1=0 parameter2=91 END	
+			IF_EXISTS	
+		END
+		
+		//missing strings for ability drain
+		
+		// str
+
+		ACTION_FOR_EACH resource IN
+			bonefd.itm
+			dwwhip.itm
+			dwwhip01.itm
+			gorcamb.itm
+			magispwr.itm
+			schlum1.itm
+			sendai.itm
+			shadowwp.itm
+			sppr751.spl
+			spwm118.spl
+			trollspi.itm
+			trolltor.itm
+			bdshadgr.itm
+			bdshadow.itm
+			bdsw1h19.itm
+			bdgfear.spl
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=44 opcode=139 parameter1=14042 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS						
+		END
+		
+		//dex
+		
+		ACTION_FOR_EACH resource IN
+			bonedag.itm
+			bonefd.itm
+			demsuc01.itm
+			gorcamb.itm
+			gorwom1.itm
+			haunt1.itm
+			hgber01.itm
+			icetrl.itm
+			kiel1.itm
+			melis01.spl
+			npsw06.itm
+			quasclaw.itm
+			sharswd.itm
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=15 opcode=139 parameter1=14024 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS											
+		END
+
+		//con
+
+		ACTION_FOR_EACH resource IN
+			demsuc01.itm
+			gorcamb.itm
+			gorwom1.itm
+			sharswd.itm
+			spin901.spl
+			bdgfear.spl
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=10 opcode=139 parameter1=14029 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS											
+		END
+		
+		
+		//int
+
+		ACTION_FOR_EACH resource IN
+			sirine1.itm
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR silent=1 match_opcode=19 opcode=139 parameter1=14021 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS											
+		END
+
+		//wis
+
+		ACTION_FOR_EACH resource IN
+			wawak.itm
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=49 opcode=139 parameter1=14047 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS											
+		END
+
+	/////////////////////////////////////////////////////////////
+	/*
+	Lower Resistance (166)
+
+	There is an icon (106) and a number of strings: 'magic resistance lowered' (14790) and a 
+	number of more specific ones. There's too little evidence to infer a consistent glow or sparkle.
+	*/
+	///////////////////////////////////////////////////////////////
+
+
+		// missing icons - MR
+		
+		ACTION_FOR_EACH resource IN
+			BEGUILE.SPL
+			DEMOSUM4.ITM
+			GORCAMB.ITM
+			INSANITY.SPL
+			OHBBRVGR.ITM
+			RAVAG01.ITM
+			SPERMEL.ITM
+			SPIN553.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=166 opcode=142 parameter1=0 parameter2=106 END
+			IF_EXISTS
+		END
+		
+		// missing MR string
+		
+		
+
+		ACTION_FOR_EACH resource IN
+			BEGUILE.SPL
+			INSANITY.SPL
+			SPWI608.SPL
+			DEMOSUM4.ITM
+			GORCAMB.ITM
+			OHBBRVGR.ITM
+			RAVAG01.ITM
+			SPERMEL.ITM
+			SW1H77.ITM
+			WAND18.ITM
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=166 opcode=139 parameter1=14790 parameter2=0 timing=1 duration=0 END
+			IF_EXISTS
+		END	
+		
+
+	/////////////////////////////////////////////////////////////
+	/*
+	Saving throw reduction (33-37,325)
+
+	You could debate this, but I think in general one should have the icon 'malison' (45)and the string 'saving throws lowered' (44916)
+
+	Special cases: doom; BG1 succubus energy drain; chant
+	*/
+	///////////////////////////////////////////////////////////////
+
+
+		//saving throw effects missing both
+		ACTION_IF is_bg2 BEGIN
+			ACTION_FOR_EACH resource IN
+				BEGUILE.SPL
+				INSANITY.SPL
+				SPERMEL.ITM
+				GORWOM1.ITM
+				DEMSUC01.ITM
+				HGNYMPH.ITM
+				SPWI930.SPL
+			BEGIN
+				COPY_EXISTING "%resource%" override
+					LPF CLONE_EFFECT INT_VAR match_opcode=37 opcode=139 parameter1=44916 parameter2=0 timing=1 duration=0 END
+					LPF CLONE_EFFECT INT_VAR match_opcode=37 opcode=142 parameter2=45 END
+			END	
+			
+			//saving throw effects missing icon only
+
+			ACTION_FOR_EACH resource IN
+				SPIN553.SPL
+			BEGIN
+				COPY_EXISTING "%resource%" override
+					LPF CLONE_EFFECT INT_VAR match_opcode=37 opcode=142 parameter2=45 END
+			END	
+		END
+
+
+	/////////////////////////////////////////////////////////////
+	/*
+	Web (157)
+
+	Comes with the string 'held' (14102, by default), the icon 'webbed' (129) and the opcode
+
+	*/
+	///////////////////////////////////////////////////////////////
+
+	// web effects with the wrong icon
+
+		ACTION_FOR_EACH resource IN
+			kuobolt3.itm // kuo-toa bolt, Held=>Webbed
+			wand14.itm // web sack - Held->Webbed
+			spin566.spl // mimic web - Held=>Webbed
+		BEGIN
+			COPY_EXISTING "%resource%" override
+					LPF ALTER_EFFECT INT_VAR match_opcode=142 parameter2=129 END
+			IF_EXISTS
+		END
+		
+	// web effects missing the 'held' string
+
+		ACTION_FOR_EACH resource IN
+			spin566.spl
+			spin683.spl
+			wand14.itm
+			BDSPIDGA.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=157 opcode=139 parameter1=14102 parameter2=0 timing=1 duration=0 END
+			IF_EXISTS
+
+		END
+
+	/////////////////////////////////////////////////////////////
+	/*
+	Entangle (154)
+
+	The opcode itself is just cosmetic. it comes with
+	- payload: movement rate set to 0, -2 penalty to AC
+	- portrait icon 144
+
+	I think everything has these, so no changes needed
+
+	*/
+	///////////////////////////////////////////////////////////////
+
+
+
+
+	END
+	
+END

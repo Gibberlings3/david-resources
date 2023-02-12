@@ -1,0 +1,32 @@
+BACKUP ~weidu_external/backup/dw_som~
+AUTHOR ~For help troubleshooting installation problems, go to the Sword Coast Stratagems forum at forums.gibberlings3.net.~
+MODDER setup_tra none area_variables none missing_extern none missing_resref none ict2_actions none missing_eval none overwriting_file none fun_args warn
+VERSION ~1~
+README ~dw_opcodes/doc/dw_opcodes.html~
+AUTO_EVAL_STRINGS
+
+ALWAYS
+END
+
+//BEGIN "test space" DESIGNATED 0
+
+
+
+BEGIN "Run the 'dw_opcodes' function" DESIGNATED 100
+
+INCLUDE "%MOD_FOLDER%/dw_opcodes/lib/opcode_wrap.tph"
+LAF opcode_wrap 
+	INT_VAR telemetry=0 // set to 1 to get debug feedback
+	STR_VAR loc="%MOD_FOLDER%/dw_opcodes" // location of the 'lib', 'files' and 'data' folders for the function
+			tra_loc="lang" // top-level tra directory for the mod's tra file
+			tra="dw_opcodes.tra" // actual name for the tra file
+END
+
+
+/*
+BEGIN "idempotency check" DESIGNATED 200
+
+INCLUDE "%MOD_FOLDER%/lib/opcode_wrap.tph"
+LAF opcode_idempotency_check END
+
+*/

@@ -1,0 +1,65 @@
+/// use this to handle any spell shared across IWD and BG?2
+
+DEFINE_ACTION_FUNCTION opcode_repeats_shared BEGIN
+
+	// straightforward cases where the effect applies differently at different levels
+	
+	LAF handle_effect_replications INT_VAR payload=128 STR_VAR resource=SPWI508 END // chaos  
+	LAF handle_effect_replications INT_VAR payload=128 STR_VAR resource=SPDR501 END // chaos (druid version) 
+
+	//dolorous decay has two separate disease effects each with its own ending sound - one with a saving throw, one without. That's beyond what I can realistically
+	//catch automatically.
+	// to complicate matters, on the BG version there is a bug in DD that means both sound effect play even if you make the saving throw
+	
+	// fix the bug. (If some other mod has messed, I assume it's done so intelligently, sweet summer child that I am.)
+	
+	COPY_EXISTING "SPPR610.SPL" override
+		LPF ALTER_EFFECT INT_VAR silent=1 match_opcode=174 match_duration=56 match_timing=4 savingthrow=BIT2 END
+	
+	// secondary spell to do no-save cancel sound
+	COPY_EXISTING "SPPR610.SPL" "override/SPPR610A.SPL"
+		WRITE_LONG 0x8 "-1"
+		WRITE_BYTE 0x27 $msectype_array(78)
+		GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				PATCH_IF (SHORT_AT fx_off=174 && BYTE_AT (fx_off+0xc)=4 && LONG_AT (fx_off+0x24)=0) BEGIN
+					// no action needed, already no saving throw
+				END ELSE BEGIN
+					WRITE_LONG fx_off 999
+				END
+			END
+		END
+		LPF DELETE_EFFECT INT_VAR match_opcode=999 END
+
+	// secondary spell to do has-save cancel sound
+	OUTER_SET savematch="-1"
+	COPY_EXISTING "SPPR610.SPL" "override/SPPR610B.SPL"
+		WRITE_LONG 0x8 "-1"
+		WRITE_BYTE 0x27 $msectype_array(78)
+		GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				PATCH_IF (SHORT_AT fx_off=174 && BYTE_AT (fx_off+0xc)=4 && !(LONG_AT (fx_off+0x24)=0)) BEGIN
+					READ_LONG (fx_off+0x24) savematch
+					WRITE_LONG (fx_off+0x24) 0
+					WRITE_LONG (fx_off+0x28) 0
+				END ELSE BEGIN
+					WRITE_LONG fx_off 999
+				END
+			END
+		END
+		LPF DELETE_EFFECT INT_VAR match_opcode=999 END
+	
+	// edit primary spell	
+	
+	COPY_EXISTING "SPPR610.SPL" override
+		LPF DELETE_EFFECT INT_VAR match_opcode=174 match_timing=4 END
+		LPF CLONE_EFFECT INT_VAR multi_match=1 match_opcode=78 match_savingthrow=0 opcode=146 parameter2=1 timing=1 duration=0 special=0 STR_VAR resource=SPPR610A END
+		LPF CLONE_EFFECT INT_VAR multi_match=1 match_opcode=78 match_savingthrow=savematch opcode=146 parameter2=1 timing=1 duration=0 special=0 STR_VAR resource=SPPR610B END
+
+
+
+END

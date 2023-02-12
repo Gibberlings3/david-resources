@@ -1,0 +1,261 @@
+/*
+
+In IWDEE, there is a very reliable association of glows (opcode 61) with animations (opcode 215). The reason for this is that 
+the combination of 61 and 255 is normally an implementation of the oIWD opcode 233 - i.e. in IWDEE the animation and glow were
+bound together.
+
+This means that when the rule is broken it's normally reasonable to assume it's a bug (doubly so because the glows are intentionally associated with
+the animation colors)
+
+
+*/
+
+DEFINE_ACTION_FUNCTION iwd_glows BEGIN
+
+	// these aren't fixed:
+	/*
+	THRYM.ITM (uses ALTERH with no glow, but has an associated opcode 50 with a 1-sec delay that would clash with it (and had no animation in oIWD)
+	VAMP.ITM (basically-unused BG2 effect)
+	VAMP1.ITM (ditto)
+	SPIN184.SPL (uses DISINTH with no 61 glow, but has a 50 glow that will clash)
+	SPIN148.SPL (had FODEATH added in EE, no animation in oIWD)
+	SPWI220.SPL (PW Sleep - has MTOUCHH added, clearly to adapt to IWDEE)
+	SPWI815.SPL (Power Word Blind - used MTOUCHH even in oIWD, but has an existing glow that would clash)
+	SPPR722.SPL (unused HLA)
+	spwi54.spl // unused CS version of FoD
+	SLAYLIVE.ITM // unused BG2EE resource
+	SPIN200.SPL // unused heal effect
+	SPIN802.SPL //unused psychic drain effect
+	vorpal.spl //unused vorpal-hit effect
+	sppr599.spl // unused npc slay-living from BG2EE
+	*/
+
+	// SPPR407 (protection from lightning) has a second 61 that I think is a relic of some conversion - it doesn't make sense here
+
+	COPY_EXISTING "sppr407.spl" override
+		LPF DELETE_EFFECT INT_VAR match_opcode=61 match_parameter1=(36*0x100 + 70*0x10000 + 109*0x1000000) END
+
+	// Every use of the CLDAMAH/CCDAMAH/CSDAMAH animation except those in Holy Smite/Unholy Blight (there are 27 such blocks) gets the target to glow red, matching the animation.
+	// So leaving it off SPPR313/SPPR314 is probably an error
+
+	COPY_EXISTING 
+		"sppr313.spl" override
+		"sppr314.spl" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=15*0x10000 parameter1=255*0x100 STR_VAR resource="" END
+
+	//SPIN170.SPL uses CCOMMAH with no glow, but every other use has a glow
+	
+	COPY_EXISTING "spin170.spl" override
+		LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=15*0x10000 parameter1=129*0x100 + 123*0x1000000 STR_VAR resource="" END
+	
+
+	// The low-level cure wounds animations (CLWOUNH,CMWOUNH) are normally associated with glow 0/126/255, while the high-level ones (CSWOUNH,CCWOUNH) are associated with
+	// 56/142/229 (slightly warmer animation) and HEAL (HEALH) uses 43-136-255. There are a very few exceptions, which look like bugs (often the wrong-level color is applied)
+	
+	// these ones have missing glows
+	
+	ACTION_FOR_EACH resource IN
+		GIVING.ITM // the Giving Star - is supposed to cast CLW
+		U2HAX3B.ITM // Life Giver axe - ditto
+		UHALB3C.ITM // and another one
+		USSWD3B.ITM // and another one
+		USSWD5A.ITM // ...
+	BEGIN
+		COPY_EXISTING "%resource%" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=30*0x10000 parameter1=126*0x10000 + 255*0x1000000 STR_VAR match_resource=CLWOUNH resource="" END
+	END
+	ACTION_FOR_EACH resource IN
+		BLOODGF.ITM // Blood of the Gloomfrost - is supposed to heal wielder from time to time
+		ELFWINE.ITM // Elven healing wine - basically a healing potion
+	BEGIN
+		COPY_EXISTING "%resource%" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=30*0x10000 parameter1=126*0x10000 + 255*0x1000000 STR_VAR match_resource=CMWOUNH resource="" END
+	END
+
+	ACTION_FOR_EACH resource IN
+		UTSWD5B.ITM // another self-healing weapon
+	BEGIN
+		COPY_EXISTING "%resource%" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=30*0x10000 parameter1=56*0x100 + 142*0x10000 + 229*0x1000000 STR_VAR match_resource=CCWOUNH resource="" END
+	END
+
+	ACTION_FOR_EACH resource IN
+		SPAWN.ITM // another self-healing weapon
+	BEGIN
+		COPY_EXISTING "%resource%" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=30*0x10000 parameter1=43*0x100 + 136*0x10000 + 255*0x1000000 STR_VAR match_resource=HEALH resource="" END
+	END
+	
+		// these ones have inaccurate glows 
+
+	
+	ACTION_FOR_EACH resource IN
+		SPCL211.SPL // lay on hands - needs to change color when it changes anim
+		SPCL815.SPL // monk lay on hands, ditto
+		EXTHEAL.ITM // potion of extra-healing - very-slightly-off colors
+		POTN52.ITM // BG2EE extra-healing
+		POTN55.ITM //BG2EE superior healing
+		SPIN733.SPL // Wish effects
+		SPIN734.SPL
+		SPIRIT.ITM // spirit essence		
+	BEGIN
+		COPY_EXISTING "%resource%" override
+			PATCH_IF "%SOURCE_EXT%" STR_EQ "ITM" BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS			
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				61_off="-1"
+				SPRINT anim "none"
+				GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=61 BEGIN
+						61_off=fx_off
+					END ELSE
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII fx_off+0x14 anim
+					END
+				END
+				PATCH_IF ("%anim%" STR_EQ "CSWOUNH" || "%anim%" STR_EQ "CCWOUNH") &&  61_off>=0 BEGIN
+					WRITE_LONG (61_off+0x4) 56*0x100 + 142*0x10000 + 229*0x1000000
+				END ELSE
+				PATCH_IF ("%anim%" STR_EQ "HEALH") BEGIN
+					WRITE_LONG (61_off+0x4) 43*0x100 + 136*0x10000 + 255*0x1000000
+				END
+			END
+
+
+
+	END
+
+	
+
+
+	//the 'strength' animation is almost always associated with glow 132/73/0, but the glow was left off JHOSWD3
+	
+	COPY_EXISTING "jhoswd3.itm" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=30*0x10000 parameter1=132*0x100 + 73*0x10000 STR_VAR resource="" END
+	
+	// the necromancy animation ('necroh') is associated 198 times with glow 180/210/180, but is left off the LTOUCH.SPL subspell
+	
+	COPY_EXISTING "ltouch.spl" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=25*0x10000 parameter1=180*0x100 + 210*0x10000 + 80*0x1000000 STR_VAR resource="" END
+	
+	// this Wish effect uses EXALTAH with a glow, but no oIWD does so, so I think this is a graphics error
+	
+	COPY_EXISTING "SPIN737.SPL" override
+		LPF DELETE_EFFECT INT_VAR match_opcode=61 END
+
+	
+	// adis.itm (a cutscene Seer item) uses DISINTH but doesn't get the 105/215/70 glow
+
+	COPY_EXISTING "adis.itm" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=30*0x10000 parameter1=105*0x100 + 215*0x10000 + 70*0x1000000 STR_VAR resource="" END
+	
+	
+	// these items use Finger of Death (FODEATH) but no glow (normal glow is 30-215-70)
+	
+	ACTION_FOR_EACH resource IN
+		SPWI031.SPL // the trap version of Finger of Death
+		WITHERY.ITM // "Ol' Withery" - weapon with instakill effect
+	BEGIN
+		COPY_EXISTING "%resource%" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=30*0x10000 parameter1=215*0x100 + 70*0x10000 + 105*0x1000000 STR_VAR resource="" END
+	END
+	
+	// these items use the 'slay living' animation (SLIVINH) but have no glow
+	
+	
+	COPY_EXISTING "spin116.spl" override // death knell
+		LPF CLONE_EFFECT INT_VAR match_opcode=215 opcode=61 parameter2=30*0x10000 parameter1=215*0x100 + 70*0x10000 + 105*0x1000000 STR_VAR resource="" END
+	
+	// Helmite 'seeking sword' uses INVOCH but has the wrong glow (should be 110/10/200) - probably a copy-paste from BG2EEE
+	
+	COPY_EXISTING "sw1hseek.itm" override // death knell
+		LPF ALTER_EFFECT INT_VAR match_opcode=61 parameter2=30*0x10000 parameter1=110*0x100 + 10*0x10000 + 200*0x1000000 END
+
+	// The 'mmagich' animation is supposed to have no glow, but has been added to a few BG imports without removing their glow
+	
+	ACTION_FOR_EACH resource IN
+		SPIN731.SPL // wish resources
+		SPIN732.SPL
+	BEGIN
+		COPY_EXISTING "%resource%" override
+			LPF DELETE_EFFECT INT_VAR match_opcode=61 END
+	END
+
+END
+
+//////////////////////////////////////////
+/* Just for completeness here's the code I
+used to look for mismatches (run after running
+the latest version of iwd_glows)
+*/
+//////////////////////////////////////////
+
+
+DEFINE_ACTION_FUNCTION research_iwd_glows BEGIN
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		PATCH_MATCH "%SOURCE_FILE%" WITH
+		THRYM.ITM 
+		VAMP.ITM
+		VAMP1.ITM
+		SPWI220.SPL
+		SPWI815.SPL
+		SPIN148.SPL
+		SPIN184.SPL
+		SPPR722.SPL
+		SPWI054.SPL
+		SLAYLIVE.ITM
+		BEGIN END
+		DEFAULT
+			found_lower=0
+			found_icon=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+				anim_count=0
+				glow_code=0
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII fx_off+ 0x14 anim
+						TO_UPPER anim
+						anim_count+=1
+					END ELSE
+					PATCH_IF opcode=61 BEGIN
+						READ_LONG fx_off+0x4 glow_code
+					END
+				END	
+				PATCH_IF anim_count=1 BEGIN
+					PATCH_IF VARIABLE_IS_SET $anim_glow_maps("%anim%" "%glow_code%") BEGIN
+						SET $anim_glow_maps("%anim%" "%glow_code%")+=1
+					END ELSE BEGIN
+						SET $anim_glow_maps("%anim%" "%glow_code%")=1
+						SPRINT $anim_glow_ex("%anim%" "%glow_code%") "%SOURCE_FILE%"
+					END
+					PATCH_IF VARIABLE_IS_SET $anim_glow_first("%anim%") && !(glow_code=$anim_glow_first("%anim%")) BEGIN
+						SPRINT $anim_codes_mismatch("%anim%") ""
+					END ELSE BEGIN
+						SET $anim_glow_first("%anim%")=glow_code
+					END
+				END
+			END
+		END
+	ACTION_SORT_ARRAY_INDICES anim_codes_mismatch LEXICOGRAPHICALLY
+	ACTION_PHP_EACH anim_codes_mismatch AS anim=>discard BEGIN
+		ACTION_PHP_EACH anim_glow_maps AS k=>v BEGIN
+			ACTION_IF "%k_0%" STR_EQ "%anim%" BEGIN
+				OUTER_SPRINT ex $anim_glow_ex("%anim%" "%k_1%")
+				PRINT "%k_0%,%k_1%: %v% (ex. %ex%)"
+			END
+		END
+	END
+END
+

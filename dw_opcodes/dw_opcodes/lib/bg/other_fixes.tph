@@ -1,0 +1,67 @@
+DEFINE_ACTION_FUNCTION other_fixes BEGIN
+
+	// rebuild Holy Word so as not to use a blizzard of 177s
+	
+	// start by making a subspell that applies the actual payload 
+	
+	COPY_EXISTING "sppr710.spl" "override/sppr710a.spl" // since we're doing a hard rebuild we don't care about overwriting
+		WRITE_LONG 0x8 "-1"
+		LPF ALTER_SPELL_HEADER INT_VAR projectile=1 END
+		LPF DELETE_EFFECT END // wipe spell
+		// general cosmetics
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=61 target=2 parameter1=128*0x100 + 128*0x10000 + 128*0x1000000 parameter2=25*0x10000 timing=1 END // white glow
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=141 target=2 parameter2=22 timing=1 END
+		// death (level 0-3)
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=13 target=2 parameter1=0 parameter2=BIT2 timing=1 dicenumber=3 dicesize=0 END
+		// stun 1 turn (level 4-7)
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=45 target=2 duration=60 dicenumber=7 dicesize=4 END // stun opcode
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=139 target=2 timing=1 duration=0 parameter1=1280 parameter2=0 dicenumber=7 dicesize=4 END // 'stunned' string
+		// slow 1 turn with 75% chance of spell failure (level 8-11)
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=40 target=2 duration=60 dicenumber=11 dicesize=8 END // slow opcode
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=139 target=2 timing=1 duration=0 parameter1=14668 parameter2=0 dicenumber=11 dicesize=8 END // 'slowed' string
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=60 target=2 parameter1=75 parameter2=0 duration=60 dicenumber=11 dicesize=8 END // casting failure: mage 
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=60 target=2 parameter1=75 parameter2=1 duration=60 dicenumber=11 dicesize=8 END // casting failure: priest
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=142 target=2 parameter1=0 parameter2=83 duration=60 dicenumber=11 dicesize=8 END // casting failure icon
+		// deafness 1 turn with 50% chance of spell failure (level 12+) NB the deafness opcode automatically imposes the spell failure
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=80 target=2 duration=60 dicenumber=0 dicesize=12 END // deafness opcode
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=142 target=2 parameter2=112 duration=60 dicenumber=0 dicesize=12 END // deafness icon
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=139 target=2 timing=1 duration=0 parameter1=14073 parameter2=0 dicenumber=0 dicesize=12 END // 'deafness' string
+
+	// now apply the payload subspell to the core spell
+
+	COPY_EXISTING "sppr710.spl" override
+		LPF ALTER_SPELL_HEADER INT_VAR projectile=212 END
+		LPF DELETE_EFFECT INT_VAR match_target=2 END // wipe spell (leave a cosmetic effect on caster)
+		// target undead
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=326 target=2 parameter1=0 parameter2=1 STR_VAR resource=sppr710a END
+		// undead then get momentary immunity so they're not double-tapped
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=318 target=2 parameter1=0 parameter2=1 STR_VAR resource=sppr710 END
+		// target evil creatures
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=326 target=2 parameter1=0 parameter2=37 STR_VAR resource=sppr710a END
+		
+
+	// rebuild Unholy Word, likewise
+
+	// the subspell is identical to Holy Word other than a cosmetic glow
+	
+	COPY_EXISTING "sppr710a.spl" "override/sppr715a.spl"
+		LPF ALTER_EFFECT INT_VAR match_opcode=61 parameter1=160*0x100 + 32*0x10000 + 0*0x1000000 END
+
+	// the main spell
+	
+	COPY_EXISTING "sppr715.spl" override
+		LPF DELETE_EFFECT INT_VAR match_target=2 END // wipe spell (leave a cosmetic effect on caster)
+		// target good creatures
+		LPF ADD_SPELL_EFFECT INT_VAR opcode=326 target=2 parameter1=0 parameter2=33 STR_VAR resource=sppr715a END
+	
+	// Hopelessness has some bugs
+	
+	COPY_EXISTING "spwi411.spl" override
+		// remove no-save application of the HOPELESSNESS splstate
+		LPF DELETE_EFFECT INT_VAR match_opcode=328 match_parameter2=0 match_savingthrow=0 END
+	
+	
+
+
+
+END

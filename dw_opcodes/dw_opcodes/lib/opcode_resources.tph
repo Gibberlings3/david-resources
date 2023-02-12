@@ -1,0 +1,459 @@
+DEFINE_ACTION_FUNCTION opcode_fixes_setup 
+	STR_VAR loc="%MOD_FOLDER%"
+	RET ldi_stat
+	RET_ARRAY ignore_these_resources
+			  msectype_array
+			  opcode_strrefs
+			  opcode_icons
+			  opcode_animations
+			  opcode_sparkles
+			  opcode_glows
+			  opcode_eff_arr
+			  opcode_splstate_map
+			  splstate_id_map
+			  opcode_removal_map
+BEGIN
+
+	SILENT
+	
+
+	// define the new spellstates
+
+	<<<<<<<< .../fp-inline/immunities.2da
+	2DA V1.0
+			opcode		id				
+	1		5			CHARM_IMMUNITY		
+	2		39			SLEEP_IMMUNITY		
+	3		45			STUN_IMMUNITY		
+	4		24			PANIC_IMMUNITY		
+	5		128			CONFUSION_IMMUNITY	
+	6		175			HOLD_IMMUNITY		
+	7		157			WEB_IMMUNITY		
+	8		154			ENTANGLE_IMMUNITY	
+	9		134			PETRIFY_IMMUNITY	
+	10		238			DISINTEGRATE_IMMUNITY	
+	11		38			SILENCE_IMMUNITY	
+	12		76			FEEBLEMIND_IMMUNITY	
+	13		16			HASTE_IMMUNITY		
+	14		40			SLOW_IMMUNITY		
+	15		55			DEATH_IMMUNITY		
+	16		minorglobe	MINOR_GLOBE			
+	17		majorglobe	MAJOR_GLOBE		
+	18		nausea		NAUSEA_IMMUNITY
+	19		109			PARALYZE_IMMUNITY
+	20		74			BLINDNESS_IMMUNITY
+	21		80			DEAFNESS_IMMUNITY
+	22		78			DISEASE_IMMUNITY
+	>>>>>>>>
+
+	COPY - ".../fp-inline/immunities.2da" nowhere
+		SPRINT to_append ""
+		COUNT_2DA_COLS colcount
+		READ_2DA_ENTRIES_NOW immune_entries colcount
+		FOR (row=0;row<immune_entries;++row) BEGIN
+			READ_2DA_ENTRY_FORMER immune_entries row 1 opcode
+			READ_2DA_ENTRY_FORMER immune_entries row 2 id
+			LPF ds_resolve_stat STR_VAR id RET stat_ind END
+			SET $opcode_splstate_map("%opcode%")=stat_ind
+			SET $splstate_id_map("%id%")=stat_ind
+		END
+
+	//define the array of resources to skip
+
+	ACTION_DEFINE_ASSOCIATIVE_ARRAY ignore_these_resources BEGIN
+		SPWI939.SPL=>"" //CHARM_HERO
+		SPWI996.SPL=>"" //CHARM_KORAX
+		SPIN785.SPL=>"" //PERM_CHARM
+		SPIN572.SPL=>"" //CUTSCENE_HASTE
+		SPIN584.SPL=>"" //GAIN_HASTE_TEMPORARY - unused?
+		RUNRUN.SPL=>""
+		SPIN672.SPL=>"" // QUICK_INVISIBLE
+		OHBJOKE1.SPL=>""
+		OHBJOKE2.SPL=>""
+		OHBJOKE3.SPL=>""
+		MAGICONF.ITM=>"" //unused
+		SPIN919.SPL=>"" // JAHEIRA_WEAKNESS
+		SPIN808.SPL=>"" // DRAIN_PARTY
+		SPIN817.SPL=>"" //C6BODHI_WEAKNESS
+		CH3DRAIN.SPL=>"" // unused
+		SPIDWR.ITM=>"" //unused
+		SPIN947.SPL=>"" //CUTSCENE_FOG
+		CH3WEAK.SPL=>"" // I-think-unused script effects
+		CH3AWAY.SPL=>""
+		CH3WEAK.SPL=>""
+		CH3FLASH.SPL=>""
+		CH3SLAY.SPL=>""
+		SPIN628.SPL=>"" //SLOW_FREEZE
+		SPIN818.SPL=>"" //C6VAMPIRE_WEAKNESS
+		SPIN776.SPL=>"" //MAKE_STATUE
+	END
+	ACTION_IF GAME_IS BGEE BEGIN // a few resources not used in BGEE
+		ACTION_DEFINE_ASSOCIATIVE_ARRAY ignore_these_resources BEGIN
+			SPCL641.SPL => ""
+			SPIN937.SPL => ""
+			DEMMAU01.ITM => ""
+		END
+	END
+	ACTION_IF GAME_IS IWDEE BEGIN
+		ACTION_DEFINE_ASSOCIATIVE_ARRAY ignore_these_resources BEGIN
+			SFLAIL.ITM=>"" // IWD flail, done manually in opcode_repeats
+			SPIN115.SPL=>"" // Mournful Wail, ditto
+			SPPR326.SPL=>"" // Mold Touch, ditto
+		END	
+	END
+
+	/// set all the new sectypes
+
+	COPY_EXISTING - msectype.2da nowhere
+		READ_2DA_ENTRIES_NOW msectype_data 2
+		FOR (row=0;row<msectype_data;++row) BEGIN			
+			READ_2DA_ENTRY_FORMER msectype_data row 0 msectype_name
+			INNER_PATCH "%msectype_name%" BEGIN
+				REPLACE_EVALUATE "dw_persistent_\(.*\)" BEGIN
+					SET $msectype_array("%MATCH1%")=row - 1
+				END
+				""
+			END
+		END
+		current_index=msectype_data - 1
+
+	OUTER_SPRINT addition ""
+	ACTION_FOR_EACH opcode IN
+			5 //charm
+			16 //haste
+			//20 //invisibility = we don't bother because Invisibility has no associated persistent effects
+			24 //fear
+			25 //poison
+			38 //silence
+			39 //sleep
+			40 //slow
+			45 //stun
+			74 //blindness
+			76 //feeblemind
+			78//disease
+			80 //deafness
+			94 //drunkenness
+			109 //paralysis
+			128 // confusion
+			175 //hold	
+			216 //energy drain
+			malison // virtual 
+			700 // virtual
+	BEGIN
+		ACTION_IF !VARIABLE_IS_SET $msectype_array("%opcode%") BEGIN
+			OUTER_SPRINT addition "%addition%dw_persistent_%opcode%%TAB%-1%WNL%"
+			OUTER_SET $msectype_array("%opcode%")=current_index
+			OUTER_SET ++current_index
+		END
+	END
+	ACTION_IF "%addition%" STR_CMP "" BEGIN
+		APPEND "msectype.2da" "%addition%"
+		COPY_EXISTING "msectype.2da" override
+			PRETTY_PRINT_2DA
+			REPLACE_TEXTUALLY "2DA[ %TAB%]+V1.0" "2DA V1.0"
+	END
+
+
+	// load in the list of icons,strrefs,anims etc
+	
+	ACTION_IF GAME_IS BG2EE BEGIN
+		OUTER_SPRINT file opcode_associations_bg2.2da
+	END ELSE 
+	ACTION_IF GAME_IS BGEE BEGIN
+		OUTER_SPRINT file opcode_associations_bg.2da	
+	END ELSE
+	ACTION_IF GAME_IS IWDEE BEGIN
+		OUTER_SPRINT file opcode_associations_iwd.2da	
+	END ELSE
+	BEGIN
+		FAIL "game not supported"
+	END
+	COPY - "%loc%/data/%file%" nowhere
+		READ_2DA_ENTRIES_NOW opcode_data 7
+		FOR (row=0;row<opcode_data;++row) BEGIN
+			READ_2DA_ENTRY_FORMER opcode_data row 1 opcode
+			READ_2DA_ENTRY_FORMER opcode_data row 2 strrefs
+			READ_2DA_ENTRY_FORMER opcode_data row 3 icons
+			READ_2DA_ENTRY_FORMER opcode_data row 4 animations
+			READ_2DA_ENTRY_FORMER opcode_data row 5 sparkles
+			READ_2DA_ENTRY_FORMER opcode_data row 6 glows
+			PATCH_FOR_EACH type IN strrefs icons animations sparkles BEGIN
+				SPRINT data EVAL "%%type%%"
+				TO_UPPER data
+				PATCH_IF "%data%" STR_CMP "*" BEGIN
+					INNER_PATCH	"%data%," BEGIN
+						REPLACE_EVALUATE "\([^,]+\)," BEGIN
+							SPRINT $"opcode_%type%"("%opcode%" "%MATCH1%") ""
+						END
+						""
+					END
+				END
+			END
+			PATCH_IF "%glows%" STR_CMP "*" BEGIN
+				INNER_PATCH "%glows%" BEGIN
+					REPLACE_EVALUATE "\([0-9]+\)|\([0-9]+\)|\([0-9]+\)" BEGIN
+						val=MATCH1*0x100 + MATCH2*0x10000 + MATCH3*0x1000000
+						SPRINT $"opcode_glows"("%opcode%" "%val%") ""
+					END
+					""
+				END
+			END
+		END
+
+	// work out the content of each .eff file
+	
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+	// record which opcode removes which opcode
+	
+	ACTION_DEFINE_ASSOCIATIVE_ARRAY opcode_removal_map BEGIN
+		2=>39 // sleep
+		4=>3 // berserking (we don't use this)
+		11=>25 // poison
+		46=>45 // stun
+		47=>20 //invisibility
+		48=>38 // silence
+		75=>74 //blindness
+		77=>76 // feeblemind
+		79=>78 // disease
+		81=>80 // deafness
+		161=>24 // horror
+		162=>109 // paralysis (also hold)
+		164=>94 // drunkenness
+		224=>216 // level drain
+		242=>128 // confusion
+	END
+
+	// add a splprot line
+
+	LAF resolve_splprot_entry_localcopy INT_VAR stat=IDS_OF_SYMBOL (stats LEVEL_DRAIN_IMMUNITY) val=0 STR_VAR relation=greater description="LEVEL_DRAIN_IMMUNITY>0" RET ldi_stat=value END
+
+	// make spells to display 'haste negated by slow' and 'slow negated by haste', if they don't exist already
+	
+	ACTION_IF !FILE_EXISTS_IN_GAME "dw_neg16.spl" BEGIN
+		CREATE spl dw_neg16
+			INSERT_BYTES 0x72 0x28
+			WRITE_LONG 0x6a (0x72+0x28)
+			WRITE_SHORT 0x68 1
+			WRITE_SHORT 0x82 1
+			LPF ADD_SPELL_EFFECT INT_VAR opcode=139 target=2 parameter1=haste_negated_strref timing=1 END
+		CREATE spl dw_neg40
+			INSERT_BYTES 0x72 0x28
+			WRITE_LONG 0x6a (0x72+0x28)
+			WRITE_SHORT 0x68 1
+			WRITE_SHORT 0x82 1
+			LPF ADD_SPELL_EFFECT INT_VAR opcode=139 target=2 parameter1=slow_negated_strref timing=1 END
+	END	
+
+	VERBOSE
+END
+
+///////////////////////////////////////////////////////////////////////////
+// find a subspell
+///////////////////////////////////////////////////////////////////////////////
+
+DEFINE_DIMORPHIC_FUNCTION find_subspell_name
+	STR_VAR parent=""
+	RET subspell
+		done
+BEGIN
+	OUTER_SET done=0
+	ACTION_TO_UPPER parent // just for tidiness
+	ACTION_IF !FILE_EXISTS_IN_GAME "%parent%.spl" BEGIN // only applies for items - kicks in if we can just use the item name	
+		OUTER_SPRINT subspell "%parent%"
+		OUTER_SET done=1
+	END ELSE BEGIN
+		// <8-letter spells: try appending a letter or number to the spell
+		ACTION_IF STRING_LENGTH "%parent%"<8 BEGIN
+			ACTION_FOR_EACH char IN A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 0 1 2 3 4 5 6 7 8 9 BEGIN
+				ACTION_IF !done && !FILE_EXISTS_IN_GAME "%parent%%char%.spl" BEGIN
+					OUTER_SET done=1
+					OUTER_SPRINT subspell "%parent%%char%"
+				END
+			END
+		END
+		// <7-letter spells: try appending 2 letters/numbers (a bit of an edge case TBH, there'd have to be 36 subspells already for above not to work)
+		ACTION_IF !done && STRING_LENGTH "%parent%"<7 BEGIN
+			ACTION_FOR_EACH char1 IN A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 0 1 2 3 4 5 6 7 8 9 BEGIN
+				ACTION_FOR_EACH char2 IN A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 0 1 2 3 4 5 6 7 8 9 BEGIN
+					ACTION_IF !done && !FILE_EXISTS_IN_GAME "%parent%%char1%%char2%.spl" BEGIN
+						OUTER_SET done=1
+						OUTER_SPRINT subspell "%parent%%char1%%char2%"
+					END
+				END
+			END
+		END
+		// if that fails (mosty likely because the parent has 8 letters) look for something with the same first 7 letters
+		ACTION_IF !done && STRING_LENGTH "%parent%"=8 BEGIN
+			OUTER_PATCH_SAVE parent "%parent%" BEGIN
+				DELETE_BYTES 0x7 1
+			END
+			ACTION_FOR_EACH char IN A B C D E F G H I J K L M N O P Q R S T U V W X Y Z 0 1 2 3 4 5 6 7 8 9 BEGIN
+				ACTION_IF !done && !FILE_EXISTS_IN_GAME "%parent%%char%.spl" BEGIN
+					OUTER_SET done=1
+					OUTER_SPRINT subspell "%parent%%char%"
+				END
+			END
+
+		END
+		//if that fails, use standardized namespace (36^4 ~ 10^6 possibilities)
+		ACTION_IF !done BEGIN
+			// this is optimized a bit, just looping 4 times with ACTION_FOR_EACH is mildly slow
+			ACTION_DEFINE_ARRAY char_array BEGIN 0 1 2 3 4 5 6 7 8 9 A B C D E F G H I J K L M N O P Q R S T U V W X Y Z END
+			OUTER_FOR (c1=0;c1<36;++c1) BEGIN			
+				OUTER_FOR (c2=0;c2<36;++c2) BEGIN			
+					OUTER_FOR (c3=0;c3<36;++c3) BEGIN			
+						OUTER_FOR (c4=0;c4<36;++c4) BEGIN
+							OUTER_SPRINT char1 $char_array("%c1%")
+							OUTER_SPRINT char2 $char_array("%c2%")
+							OUTER_SPRINT char3 $char_array("%c3%")
+							OUTER_SPRINT char4 $char_array("%c4%")
+							ACTION_IF !done && !FILE_EXISTS_IN_GAME "DWSB%char1%%char2%%char3%%char4%.spl" BEGIN
+								OUTER_SET done=1
+								OUTER_SPRINT subspell "DWSB%char1%%char2%%char3%%char4%"								
+								OUTER_SET c1=36
+								OUTER_SET c2=36
+								OUTER_SET c3=36
+								OUTER_SET c4=36								
+							END
+						END
+					END
+				END
+			END
+		END	
+		ACTION_IF !done BEGIN
+			WARN "find_subspell cannot create more than 1,679,616 subspells. (Also, if you are trying to do this, reconsider your life choices.)"
+			OUTER_SPRINT subspell "failed"
+		END
+	END
+END
+
+
+///////////////////////////////////////////////////////////////////////////
+// copied from SFO
+///////////////////////////////////////////////////////////////////////////////
+
+DEFINE_DIMORPHIC_FUNCTION resolve_splprot_entry_localcopy 
+      INT_VAR 	stat=0
+				val=0
+				value=0
+				relation_number=0
+      STR_VAR 	relation=""
+				description=""
+      RET value
+BEGIN
+      ACTION_IF !(value=0) BEGIN
+		OUTER_SET val=value
+	  END
+      ACTION_MATCH "%relation%" WITH
+         equals equal BEGIN 
+            OUTER_SET relation_number=1
+         END
+         greater greater_than BEGIN
+            OUTER_SET relation_number=3
+         END
+         less less_than BEGIN
+            OUTER_SET relation_number=2
+         END
+         greater_equal greater_equals BEGIN
+            OUTER_SET relation_number= 4
+         END
+         less_than_equal less_equal less_than_equals BEGIN
+            OUTER_SET relation_number=0
+         END
+         not_equal BEGIN
+            OUTER_SET relation_number=5
+         END
+         "" BEGIN END
+      DEFAULT
+         //LAF warning STR_VAR warning="unrecognised relation %relation% in resolve_splprot_entry; defaulting to 0" END
+         OUTER_SET relation_number=0
+      END
+      COPY_EXISTING "splprot.2da" override
+            READ_2DA_ENTRIES_NOW splprot_array 4
+            SET value="-1"
+            FOR (i=0;i<splprot_array;i+=1) BEGIN
+                   READ_2DA_ENTRY_FORMER splprot_array i 1 this_stat
+                   READ_2DA_ENTRY_FORMER splprot_array i 2 this_val
+                   READ_2DA_ENTRY_FORMER splprot_array i 3 this_relation
+                   PATCH_IF (IS_AN_INT this_stat && IS_AN_INT this_val && IS_AN_INT this_relation) BEGIN
+                     PATCH_IF (stat=this_stat && val=this_val && relation_number=this_relation) BEGIN
+                      SET value=i
+                      SET i=splprot_array
+                     END
+                   END
+            END
+            PATCH_IF value<0 BEGIN
+				PATCH_IF "%description%" STR_CMP "" BEGIN
+					SPRINT row_label "%splprot_array%_%description%"
+				END ELSE BEGIN
+					SPRINT row_label "%splprot_array%"
+				END
+               INSERT_2DA_ROW splprot_array 4 "%row_label%%TAB%%stat%%TAB%%val%%TAB%%relation_number%"
+               SET value=splprot_array
+			   PRETTY_PRINT_2DA
+            END
+      BUT_ONLY
+END
+
+///These two functions handle spells like Chaos that have multiple iterations of the same effect at different levels
+
+DEFINE_PATCH_FUNCTION remove_effect_replications BEGIN
+	// this acts on the spell being patched (must be a spell) to remove all but the first iteration of an opcode in each header (as well as any 324 blocks), and delete the save and HD data from those first iterations
+		GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH opcodes_here AS k=>v BEGIN
+				SET $opcodes_here("%k%")=0
+			END
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode
+				PATCH_IF opcode=324 || (VARIABLE_IS_SET $opcodes_here("%opcode%") && $opcodes_here("%opcode%")=1) BEGIN
+					WRITE_SHORT fx_off 999
+				END ELSE BEGIN
+					SET $opcodes_here("%opcode%")=1
+					WRITE_LONG fx_off+0x1c 0
+					WRITE_LONG fx_off+0x20 0
+					WRITE_LONG fx_off+0x24 0
+					WRITE_LONG fx_off+0x28 0
+				END
+			END
+		END
+		LPF DELETE_EFFECT INT_VAR match_opcode=999 END
+END
+
+DEFINE_ACTION_FUNCTION handle_effect_replications
+	INT_VAR payload=0
+	STR_VAR resource=""
+	RET subspell
+BEGIN
+	// make a subspell that contains only the core effect, stripped of save/HD data
+	LAF find_subspell_name STR_VAR parent="%resource%" RET subspell END
+	COPY_EXISTING "%resource%.spl" "override/%subspell%.spl"
+		WRITE_LONG 0x8 "-1"
+		LPF remove_effect_replications END
+	// patch the original spell to remove everything except the payload opcode, which casts the subspell
+	COPY_EXISTING "%resource%.spl" override
+		GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode
+				PATCH_IF opcode=payload BEGIN
+					WRITE_SHORT fx_off 146
+					WRITE_ASCII (fx_off+0x14) "%subspell%" (8)
+					WRITE_LONG (fx_off+0x4) 0 // param1=0
+					WRITE_LONG (fx_off+0x8) 1// param2=1 (cast instantly at caster level)
+					WRITE_BYTE (fx_off+0xc) 1 // timing
+					WRITE_LONG (fx_off+0xe) 0 // duration
+				END ELSE 
+				PATCH_IF !(opcode=324) BEGIN
+					WRITE_SHORT fx_off 999
+				END
+			END
+		END
+		LPF DELETE_EFFECT INT_VAR match_opcode=999 END
+
+END

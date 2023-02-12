@@ -1,0 +1,28 @@
+DEFINE_ACTION_FUNCTION opcode_repeats BEGIN 
+
+	/// sflail has a variable-duration stun effect which it implements by lots of copies of the effect with different probabilities
+	
+	// we handle it just by doing it manually and then excluding it from the general edit
+	
+	COPY_EXISTING "sflail.itm" override
+		LPF CLONE_EFFECT INT_VAR multi_match=1 match_opcode=45 opcode=324 parameter1=$opcode_splstate_map(45) parameter2=110 timing=0 duration=1 probability1=100 probability2=0 STR_VAR resource=SFLAIL END
+
+	// Mournful Wail (spin115) is similar, but has a conclusion sound effect, which makes it slightly harder to handle. We can assign the stun-removal sectype to it.
+	
+	COPY_EXISTING "spin115.spl" override
+		WRITE_BYTE 0x27 $msectype_array(45)
+		LPF CLONE_EFFECT INT_VAR multi_match=1 match_opcode=45 opcode=324 parameter1=$opcode_splstate_map(45) parameter2=110 timing=0 duration=1 probability1=100 probability2=0 STR_VAR resource=SFLAIL END
+		
+	// Mold Touch is best just done manually
+	
+	COPY_EXISTING "sppr326.spl" override
+		LPF CLONE_EFFECT INT_VAR multi_match=1 match_opcode=324 parameter1=$opcode_splstate_map(78) parameter2=110 END
+
+
+
+
+
+
+
+
+END

@@ -1,0 +1,21 @@
+2DA V1.0
+*
+			opcode		strrefs						icons				animations				sparkles		glows
+Charm		5			*							*					*						*				*
+Haste		16			14023						*					*						*				*
+Invisibility 20			37762						*					*						*				*
+Panic		24			35484						36					*						*				*
+Poison		25			*							*					*						*				*
+Silence		38			37805						34					*						*				*
+Sleep		39			37613						*					*						*				*
+Slow		40			14668,37787					*					*						*				*
+Stun		45			35568						*					*						*				*
+Blind		74			37800						*					*						*				*
+Feeblemind	76			14407						48					*						*				*
+Disease		78			*							*					*						*				*
+Deafness	80			*							112					*						*				*
+Paralysis	109			14650						13,214				*						*				*
+Confusion	128			37603,37604					2,3,47				CONFUSH					*				*
+Hold		175			*							*					PARALH					*				*
+EnergyDrain	216			35498,35472,35495,35496,35497	*				*						*				*
+AbilityDrain	700		14042,14021,14047,14024,14029,14034,35596,35597,35598,35599,						   86,91,113			*						*				*

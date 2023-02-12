@@ -1,0 +1,7 @@
+DEFINE_ACTION_FUNCTION other_fixes BEGIN
+
+	// the duration for these effects' 324/318 shields is pointlessly long (this basically doesn't matter but confuses the autodetection code)
+	
+	
+
+END

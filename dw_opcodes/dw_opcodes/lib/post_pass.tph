@@ -1,0 +1,39 @@
+//manual changes to make after the code has run
+
+DEFINE_ACTION_FUNCTION post_pass BEGIN
+
+	// False Dawn (BG only) confuses undead.
+	// We make this work by (i) removing the CONFUSION_IMMUNITY check from False Dawn (whose confusing effect already targets only undead) and
+	// (ii) putting a hole in the confusion-immunity protection of undead creatures' protective items
+
+	ACTION_IF !GAME_IS IWDEE BEGIN
+	
+		// remove the CONFUSION_IMMUNITY check
+		COPY_EXISTING "sppr609.spl" override
+			LPF DELETE_EFFECT INT_VAR match_opcode=324 match_parameter2=110 END
+	
+		// make holes
+		
+		ACTION_FOR_EACH item IN
+			ring94
+			ring95
+			ring99
+			ringkora
+			chwraith
+			gormisti		
+		BEGIN
+			COPY_EXISTING "%item%.ITM" override
+				LPF DELETE_EFFECT INT_VAR match_opcode=101 match_parameter2=128 END
+				LPF DELETE_EFFECT INT_VAR match_opcode=267 match_parameter1=14782 END
+				LPF DELETE_EFFECT INT_VAR match_opcode=296 STR_VAR match_resource=SPCONFUS END
+			IF_EXISTS
+		END
+	
+	
+	
+	END
+	
+	
+
+
+END

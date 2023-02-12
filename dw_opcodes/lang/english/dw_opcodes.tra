@@ -1,0 +1,4 @@
+@700001="Haste negated by Slow"
+@700002="Slow negated by Haste"
+@700003="Immune to hold and level drain" // must exactly match description string for Undead Hunter (strref 25208 in BG2EE)
+@700004="Immune to paralysis and level drain"

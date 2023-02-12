@@ -1,0 +1,63 @@
+DEFINE_ACTION_FUNCTION opcode_repeats BEGIN
+
+	// straightforward cases where the effect applies differently at different levels
+	
+	LAF handle_effect_replications INT_VAR payload=39 STR_VAR resource=SPPR102 END // command 
+		
+	// special cases
+	
+	// Charm Person or Mammal has two payloads, one set to ANIMAL and one to HUMANOID.
+	// Simplest to shift it over to IWD style - the appropriate 324 is actually already there
+
+	COPY_EXISTING "sppr204.spl" override
+		LPF DELETE_EFFECT INT_VAR match_opcode=5 match_parameter1=1 END // remove one charm effect
+		LPF ALTER_EFFECT INT_VAR match_opcode=5 parameter1=0 END // make the other generic
+	
+	//  mephit Color Spray (spin937) is basically ordinary color spray with an extra L5+ sleep crudely tacked on.
+	//  The result is that creatures of any level are sleeped but the graphics only happen at level 4 and below.
+	// treat this as an error.
+	
+	COPY_EXISTING "SPIN937.SPL" override
+		LPF DELETE_EFFECT INT_VAR match_dicesize=5 END
+		LPF ALTER_EFFECT INT_VAR dicenumber=0 dicesize=0 END
+	
+	// The weird 'Viper's Edge' sword from SoD
+	
+	ACTION_IF FILE_EXISTS_IN_GAME "SW1P01.ITM" BEGIN
+	
+		// secondary spells to apply its poison and paralysis effects
+		
+		// petrification 
+		CREATE spl SW1P01A
+			INSERT_BYTES 0x72 0x28
+			WRITE_LONG 0x6a (0x72+0x28)
+			WRITE_SHORT 0x68 1
+			WRITE_BYTE 0x7e 1
+			WRITE_SHORT 0x82 1
+			WRITE_SHORT 0x98 1
+			LPF ADD_SPELL_EFFECT INT_VAR opcode=134 resist_dispel=1 target=2 timing=1 END
+		
+		// poison (1 per second, 20 seconds)
+		CREATE spl SW1P01B
+			INSERT_BYTES 0x72 0x28
+			WRITE_LONG 0x6a (0x72+0x28)
+			WRITE_SHORT 0x68 1
+			WRITE_BYTE 0x7e 1
+			WRITE_SHORT 0x82 1
+			WRITE_SHORT 0x98 1
+			LPF ADD_SPELL_EFFECT INT_VAR opcode=25 resist_dispel=1 target=2 duration=20 parameter1=1 parameter2=0 END
+		
+		// main spell edits
+		
+		COPY_EXISTING "sw1p01.itm" override
+			// remove redundant icons
+			LPF DELETE_EFFECT INT_VAR match_opcode=142 END
+			// patch petrification
+			LPF ALTER_EFFECT INT_VAR match_opcode=134 opcode=146 STR_VAR resource=SW1P01A END
+			// patch poison
+			LPF ALTER_EFFECT INT_VAR match_opcode=25 opcode=146 duration=0 timing=1 STR_VAR resource=SW1P01B END
+
+	
+	END
+
+END

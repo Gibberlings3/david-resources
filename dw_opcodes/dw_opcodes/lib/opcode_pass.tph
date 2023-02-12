@@ -1,0 +1,1978 @@
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+/* The overall opcode_pass wrap
+
+Passes through all CRE/ITM/SPL files making standard changes (see opcode_pass_core below) and collecting data on more 
+complicated resources.
+
+Then goes back through those resources generating subspells etc.
+
+*/
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+DEFINE_ACTION_FUNCTION opcode_pass INT_VAR telemetry=0 BEGIN
+
+	// read existing log file (if any) for subspells)
+	
+	ACTION_IF FILE_EXISTS "weidu_external/data/dw_shared/dw_opcodes_persistent_subspells.2da" BEGIN
+		COPY - "weidu_external/data/dw_shared/dw_opcodes_persistent_subspells.2da" nowhere
+			READ_2DA_ENTRIES_NOW subspell_list 2
+			FOR (row=1;row<subspell_list;++row) BEGIN
+				READ_2DA_ENTRY_FORMER subspell_list row 0 resource
+				READ_2DA_ENTRY_FORMER subspell_list row 1 subspell
+				TO_UPPER resource
+				TO_UPPER subspell
+				SPRINT $subspell_list("%resource%" "%subspell%") ""
+				SPRINT $all_persistent_subspells("%subspell%") ""
+			END
+	END
+
+
+	// make new log file for secspells
+	
+	COPY ".../stratagems-inline/dw_opcodes_persistent_subspells.2da" "weidu_external/data/dw_shared/dw_opcodes_persistent_subspells.2da"
+
+	// make new log file for telemetry
+	
+	ACTION_IF telemetry BEGIN
+		COPY ".../stratagems-inline/blank" "weidu_external/data/dw_shared/dw_opcode_log.txt"
+	END
+
+	// load in contents of eff files
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+		SET $opcode_eff_arr("%SOURCE_RES%" "param1")=LONG_AT 0x1c
+		SET $opcode_eff_arr("%SOURCE_RES%" "param2")=LONG_AT 0x20
+
+	ACTION_CLEAR_ARRAY opcode_second_pass
+
+	// pass through items/spells
+	
+	COPY_EXISTING_REGEXP ".*\.\(itm\|spl\)" override
+		TO_UPPER SOURCE_FILE
+		CLEAR_ARRAY payloads
+		CLEAR_ARRAY persistent_payloads
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") && INDEX_BUFFER (dw_neg)<0 BEGIN // the third check stops us editing already-created haste/slow edits
+			SPRINT type "skip"
+			delta=0
+			flag_as_persistent=0
+			flag_as_multiple=0
+			reordering=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY fx_arr ITM_V10_GEN_EFFECTS
+				LPF opcode_pass_core RET delta_here END
+				delta +=delta_here
+				WRITE_SHORT 0x70 (THIS + delta_here)
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				// update index of block
+				WRITE_SHORT (0x20+ab_off) (THIS + delta)
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+				LPF opcode_pass_core RET block_remove_type delta_here persistent_removable multiple_payload_iterations reorder_324s RET_ARRAY payloads_here=payloads END
+				delta +=delta_here
+				flag_as_multiple=flag_as_multiple || multiple_payload_iterations 
+				flag_as_persistent=flag_as_persistent || persistent_removable
+				reordering=reordering || reorder_324s
+				WRITE_SHORT (0x1e+ab_off) (THIS + delta_here)
+				PATCH_MATCH "%block_remove_type%" WITH
+				skip BEGIN
+				END
+				DEFAULT
+					PHP_EACH payloads_here AS payload=>discard BEGIN
+						SET $payloads("%payload%")=1
+						PATCH_IF persistent_removable BEGIN
+							SET $persistent_payloads("%payload%")=1
+						END
+					END
+					PATCH_IF "%type%" STR_EQ "skip" BEGIN
+						SPRINT type "%block_remove_type%"
+					END ELSE
+					PATCH_IF "%type%" STR_CMP "%block_remove_type%" BEGIN
+						SPRINT type "inconsistent"
+					END
+				END
+			END
+			PATCH_MATCH "%type%" WITH
+			skip BEGIN
+				second_pass=0
+			END
+			simple BEGIN
+				second_pass=flag_as_persistent
+				payload_count=0
+				PHP_EACH payloads AS k=>v BEGIN
+					++payload_count
+				END
+				PATCH_IF payload_count>1 BEGIN
+					second_pass=1
+					SPRINT type "variable"
+				END ELSE
+				PATCH_IF flag_as_multiple && flag_as_persistent BEGIN
+					second_pass=0
+					PATCH_IF telemetry BEGIN
+						PATCH_PRINT "Resource %SOURCE_FILE% is simple but has persistent effects and multiple iterations; skipping it."
+						INNER_ACTION BEGIN
+							APPEND_OUTER "weidu_external/data/dw_shared/dw_opcode_log.txt" "Resource %SOURCE_FILE% is simple but has persistent effects and multiple iterations; skipping it."
+						END
+					END
+				END
+			END
+			DEFAULT
+				second_pass=1
+			END
+			PATCH_IF second_pass BEGIN
+				SPRINT $opcode_second_pass("%SOURCE_FILE%") "%type%"
+				// for simple type, we only care about payloads associated with persistent, removable effects.
+				// (e.g. where this happens: an item with multiple powers, where only one power needs to be processed.)
+				PATCH_IF "%type%" STR_EQ "simple" || "%type%" STR_EQ "variable" BEGIN
+					PHP_EACH persistent_payloads AS payload=>discard BEGIN
+						SET $"payloads_%SOURCE_FILE%"("%payload%")=1
+					END				
+				END ELSE BEGIN
+					PHP_EACH payloads AS payload=>discard BEGIN
+						SET $"payloads_%SOURCE_FILE%"("%payload%")=1
+					END
+				END
+				PATCH_IF flag_as_persistent BEGIN
+					SET $persistent_removable_payload("%SOURCE_FILE%")=1
+				END
+			END
+			PATCH_IF reordering BEGIN
+				LPF reorder_324s END
+			END
+		END	
+	BUT_ONLY
+
+	/// second pass
+
+
+
+	ACTION_PHP_EACH opcode_second_pass AS resource=>type BEGIN
+		LAF second_pass_process_resource INT_VAR telemetry STR_VAR resource type END	
+	END
+
+
+END	
+	
+DEFINE_ACTION_FUNCTION second_pass_process_resource
+	INT_VAR telemetry=0
+	STR_VAR resource="" type=""
+BEGIN	
+	COPY_EXISTING "%resource%" override
+		PATCH_IF telemetry BEGIN
+			PATCH_PRINT "%resource%...%type%"
+		END
+		SPRINT resref "%SOURCE_RES%"
+		SPRINT ext "%SOURCE_EXT%"
+		TO_UPPER resref
+		persistent_effects=0
+		include_all_cosmetics=0 // set to 1 only for simple blocks
+		// find out whether we can set the sectype (applies either if this is an unnamed resource - hence already a secondary resource whose sectype isn't relevant - or if its sectype is already zero)
+		PATCH_IF "%ext%" STR_EQ "spl" && "%type%" STR_CMP "variable" BEGIN
+			READ_LONG 0x8 name_strref
+			READ_BYTE 0x27 sectype
+			can_set_sectype=(sectype=0 || name_strref<0)
+		END ELSE BEGIN
+			can_set_sectype=0 // only SPL objects have settable sectypes, not an option for ITM
+			sectype="-1"
+		END
+		////// Now go by type, working out whether we need to formally dismember the spell into subspell payloads or if we can work around the existing structure.
+		////// If the latter, also check if we have persistent effects that need removing
+		PATCH_MATCH "%type%" WITH
+		/// If there are multiple payloads per header, or different payloads in different headers, or if Haste or Slow are present, we definitely need to break into subspells
+		multiple inconsistent haste_slow  BEGIN
+			dismember=1
+		END
+		//// If there are opcodes present not part of the payload, we need to break the payload out into subspell only if those opcodes occur later than any payload effect
+		complex BEGIN
+			// start by assuming we can get away with blocking the payload direct 
+			can_just_add_block=1
+			// get the payload (only needed if a spell, when there's only one)
+			PHP_EACH "payloads_%resource%" AS payload=>discard BEGIN END
+			PATCH_IF "%SOURCE_EXT%" STR_EQ "itm" BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+				// running this program in mode 2 both (a) checks if there are active opcodes after the main payload, and (b) if there are persistent effects
+				LPF filter_opcode_effects INT_VAR primary_opcode=payload mode=2 include_primary=1 RET value persistence_check END				
+				can_just_add_block=can_just_add_block && value
+				persistent_effects=persistent_effects || persistence_check
+			END
+			// OK, diagnosis over.
+			PATCH_IF can_just_add_block BEGIN
+			// if we can just add the block, do it
+				delta=0
+				// first, go through each block and actually add the 324
+				PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+					// update index of block
+					WRITE_SHORT (0x20+ab_off) (THIS + delta)
+					GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+					// running this in mode 3 adds 324 before the primary opcode
+					LPF filter_opcode_effects INT_VAR primary_opcode=payload mode=3 include_primary=1 STR_VAR current_resource="%SOURCE_RES%" RET delta_here END
+					delta +=delta_here
+					WRITE_SHORT (0x1e+ab_off) (THIS + delta_here)
+				END
+				dismember=0 // note that we don't need to break the resource up
+			END ELSE BEGIN
+			// if we can't, we have to break the resource up
+				dismember=1
+			END				
+		END
+		// simple blocks never need breaking up into subspells, except possibly for cosmetics 
+		simple variable BEGIN
+			// even to get here, there must be persistent effects
+			persistent_effects=1
+			dismember=0
+			include_all_cosmetics=1
+			// get the payload (only needed if a spell, when there's only one)
+			PHP_EACH "payloads_%resource%" AS payload=>discard BEGIN END
+		END
+		DEFAULT
+			dismember=0
+		END
+		// if we can handle persistent effects just using sectypes, do it
+		PATCH_IF persistent_effects && can_set_sectype && VARIABLE_IS_SET $msectype_array("%payload%") BEGIN
+			WRITE_BYTE 0x27 $msectype_array("%payload%")
+		END				
+	BUT_ONLY
+	/////////////////////////////////////////////////////////////////////
+	///// Now handle the case where we have to break the effect up
+	/////////////////////////////////////////////////////////////////////
+	ACTION_IF VARIABLE_IS_SET multiple_payload_effects && multiple_payload_effects && telemetry BEGIN 
+		PRINT "Multiple payload effects: %resource%"
+	END
+	ACTION_IF dismember BEGIN
+		/// we have to do this differently for spells and items
+		ACTION_IF "%ext%" STR_EQ "spl" BEGIN
+			// loop through each payload
+			ACTION_PHP_EACH "payloads_%resource%" AS payload=>discard BEGIN
+				LAF find_subspell_name STR_VAR parent="%resref%" RET subspell END
+				ACTION_IF telemetry BEGIN
+					PRINT "%subspell% (%resource%,%payload%)"
+				END
+				// make the subspell
+				COPY_EXISTING "%resource%" "override/%subspell%.spl"
+				// make the subspell; determine if there are multiple payload effects
+					LPF apply_dismember_changes STR_VAR parent_resource="%subspell%" RET multiple_payload_effects saves probs END
+					LPF reorder_324s STR_VAR resref END
+				// remove the effects from the original spell and get it to cast the subspell
+				COPY_EXISTING "%resource%" override
+					GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+					PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+						GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+						// remove the associated opcodes
+						LPF filter_opcode_effects INT_VAR primary_opcode=payload mode=1 include_primary=0 RET 177_count END
+						// if there are 177s, swap out any for which the payload is matched
+						PATCH_IF 177_count>0 BEGIN
+							GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS // get it again, it may have changed
+							PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+								PATCH_IF SHORT_AT fx_off=177 BEGIN
+									READ_ASCII fx_off+0x14 177_resource
+									TO_UPPER 177_resource
+									PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%177_resource%") && $opcode_eff_arr("%177_resource%")=payload BEGIN
+										WRITE_SHORT fx_off payload
+									END
+								END
+							END
+						END
+					END
+					LPF DELETE_EFFECT INT_VAR match_opcode=999 END
+					// if there are multiple payload effects, replace only the first with a 146 to cast the new subspell, and set probability and save data appropriately
+					PATCH_IF multiple_payload_effects BEGIN
+						PATCH_IF saves && probs BEGIN
+							LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 probability1=100 probability2=0 savingthrow=0 savebonus=0 timing=1 duration=0 STR_VAR resource="%subspell%" END
+						END ELSE
+						PATCH_IF saves BEGIN
+							LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 savingthrow=0 savebonus=0 timing=1 duration=0 STR_VAR resource="%subspell%" END						
+						END ELSE
+						PATCH_IF probs BEGIN
+							LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 probability1=100 probability2=0 timing=1 duration=0 STR_VAR resource="%subspell%" END					
+						END ELSE BEGIN
+							LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 timing=1 duration=0 STR_VAR resource="%subspell%" END						
+						END
+						LPF DELETE_EFFECT INT_VAR match_opcode=payload END
+					END ELSE BEGIN
+					// if not, just do a direct replacement, leaving probability and save data invariant. multi_match is because of ability drain
+						LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 timing=1 duration=0 STR_VAR resource="%subspell%" END	
+						PATCH_IF payload=700 BEGIN
+							LPF DELETE_EFFECT INT_VAR match_opcode=700 END
+						END
+					END
+			END	
+		END ELSE BEGIN
+			// for items, we need to work on a per-header basis
+			COPY_EXISTING - "%resource%" nowhere
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+					// find which the payloads are here
+					CLEAR_ARRAY payloads_here
+					payloads_in_this_header=0
+					GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode
+						PATCH_IF VARIABLE_IS_SET $"payloads_%resource%"("%opcode%") BEGIN
+							payloads_in_this_header=1
+							SET $payloads_here("%opcode%")=1
+						END ELSE
+						PATCH_IF (opcode=6||opcode=10||opcode=15||opcode=19||opcode=44||opcode=49) && VARIABLE_IS_SET $"payloads_%resource%"(700) BEGIN
+							payloads_in_this_header=1
+							SET $payloads_here(700)=1
+						END
+					END
+					// if there are any payloads in this header, clone its contents to a spell for each payload
+					PATCH_IF payloads_in_this_header BEGIN
+						// get the contents
+						READ_SHORT ab_off+0x20 fx_index
+						READ_SHORT ab_off+0x1e fx_count
+						READ_LONG 0x6a fx_offset
+						READ_ASCII (fx_offset + 0x30*fx_index) data (0x30*fx_count)
+						PHP_EACH payloads_here AS payload=>discard BEGIN
+							INNER_ACTION BEGIN
+								// make the subspell
+								LAF find_subspell_name STR_VAR parent="%resref%" RET subspell END
+								CREATE spl "%subspell%"
+									INSERT_BYTES 0x72 0x28
+									WRITE_LONG 0x6a (0x72+0x28)
+									WRITE_SHORT 0x68 1
+									WRITE_BYTE 0x7e 1
+									WRITE_SHORT 0x82 1
+									WRITE_SHORT 0x98 1
+									WRITE_SHORT 0x90 fx_count
+									INSERT_BYTES (0x72+0x28) (0x30*fx_count)
+									WRITE_ASCII (0x72+0x28) "%data%"
+									LPF apply_dismember_changes STR_VAR parent_resource="%resref%" RET multiple_payload_effects saves probs END
+									LPF reorder_324s STR_VAR resref="%subspell%" END
+								// strip the subspell effects from the main item and get it to cast the subspell
+								COPY_EXISTING "%resource%" "override" // we need to be a bit delicate here, as we're copying the resource inside a previous copying of itself. This is legal (I believe!)
+																	  // since we're copying to different places.
+									
+									// we don't need or want to do a top-level ability loop since we're already *in* an ability loop for this resource, just on the outermost COPY_EXISTING -
+									GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+									LPF filter_opcode_effects INT_VAR primary_opcode=payload mode=1 include_primary=0 RET 177_count END
+									LPF DELETE_EFFECT INT_VAR match_opcode=999 END
+									// if there are 177s, swap out any for which the payload is matched
+									PATCH_IF 177_count>0 BEGIN
+										GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS // get it again, it may have changed
+										PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+											PATCH_IF SHORT_AT fx_off=177 BEGIN
+												READ_ASCII fx_off+0x14 177_resource
+												TO_UPPER 177_resource
+												PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%177_resource%") && $opcode_eff_arr("%177_resource%")=payload BEGIN
+													WRITE_SHORT fx_off payload
+												END
+											END
+										END
+									END
+								// if there are multiple payload effects, replace only the first with a 146 to cast the new subspell, and set probability and save data appropriately
+									PATCH_IF multiple_payload_effects BEGIN
+										PATCH_IF saves && probs BEGIN
+											LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 probability1=100 probability2=0 savingthrow=0 savebonus=0 timing=1 duration=0 STR_VAR resource="%subspell%" END
+										END ELSE
+										PATCH_IF saves BEGIN
+											LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 savingthrow=0 savebonus=0 timing=1 duration=0 STR_VAR resource="%subspell%" END						
+										END ELSE
+										PATCH_IF probs BEGIN
+											LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 probability1=100 probability2=0 timing=1 duration=0 STR_VAR resource="%subspell%" END					
+										END ELSE BEGIN
+											LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 timing=1 duration=0 STR_VAR resource="%subspell%" END						
+										END
+										LPF DELETE_EFFECT INT_VAR match_opcode=payload END
+									END ELSE BEGIN
+									// if not, just do a direct replacement, leaving probability and save data invariant. multi_match is because of ability drain
+										LPF ALTER_EFFECT INT_VAR multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 timing=1 duration=0 STR_VAR resource="%subspell%" END						
+										PATCH_IF payload=700 BEGIN
+											LPF DELETE_EFFECT INT_VAR match_opcode=700 END
+										END
+									END
+							END
+						END
+					END
+				END	
+		
+	
+		END
+	END ELSE 
+	// if we're not dismembering, we need to handle persistent effects separately
+	ACTION_IF persistent_effects && !can_set_sectype && !(VARIABLE_IS_SET $msectype_array("%payload%") && sectype=$msectype_array("%payload%")) && (VARIABLE_IS_SET $msectype_array("%payload%") || "%type%" STR_EQ "variable") BEGIN
+		ACTION_IF "%ext%" STR_EQ "spl" && "%type%" STR_CMP "variable" BEGIN
+			ACTION_IF telemetry BEGIN
+				PRINT "removable subspell for spell %SOURCE_FILE%"
+			END
+			LAF find_subspell_name STR_VAR parent="%resref%" RET subspell END
+			// make subspell (and log it)
+			COPY_EXISTING "%resource%" "override/%subspell%.spl"
+				LPF apply_persistent_changes INT_VAR include_all_cosmetics remove_probs_saves=1 STR_VAR parent_resource="%resref%" END
+				LPF reorder_324s STR_VAR resref="%subspell%" END
+			APPEND_OUTER "weidu_external/data/dw_shared/dw_opcodes_persistent_subspells.2da" "%resource%%TAB%%subspell%"
+				// if all effects have the same signature (i.e., saving throw, save bonus, probability, dice number, dice size) then we let the 146 carry all that
+			COPY_EXISTING "%resource%" "override"
+				// go block-by-block
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+					177_count=0
+					// in case of ability drain, change all drain blocks to 700; audit for 177s
+					GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode
+						PATCH_IF (opcode=6||opcode=10||opcode=15||opcode=19||opcode=44||opcode=49) BEGIN
+							WRITE_SHORT fx_off 700
+						END	ELSE
+						PATCH_IF opcode=177 BEGIN
+							READ_ASCII fx_off+0x14 177_resource
+							TO_UPPER 177_resource
+							PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%177_resource%") && $opcode_eff_arr("%177_resource%")=payload BEGIN
+								SPRINT 177_resource_to_match "%177_resource%"
+								++177_count
+							END
+						END						
+					END
+					// do the clone
+					PATCH_IF 177_count>0 BEGIN 
+						LPF CLONE_EFFECT INT_VAR header=ab_ind multi_match=1 match_opcode=177 opcode=146 parameter1=0 parameter2=1 timing=1 duration=0 STR_VAR match_resource="%177_resource_to_match%" resource="%subspell%" insert=below END				
+					END ELSE BEGIN
+						LPF CLONE_EFFECT INT_VAR header=ab_ind multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 timing=1 duration=0 STR_VAR resource="%subspell%" insert=below END
+					END
+					// filter
+					GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS // get it again, it may have changed
+					LPF filter_opcode_effects INT_VAR primary_opcode=payload mode=1 include_non_persistent=0 include_all_cosmetics END
+					LPF DELETE_EFFECT INT_VAR header=ab_ind match_opcode=999 END
+					PATCH_IF payload=700 BEGIN
+						LPF DELETE_EFFECT INT_VAR header=ab_ind match_opcode=700 END
+					END
+				
+				END
+		END ELSE BEGIN
+			ACTION_IF telemetry BEGIN
+				PRINT "removable subspell for resource %SOURCE_FILE%"
+			END
+			LAF find_subspell_name STR_VAR parent="%resref%" RET subspell END
+			COPY_EXISTING - "%resource%" nowhere
+				PATCH_IF "%ext%" STR_EQ "ITM" BEGIN
+					GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				END ELSE BEGIN
+					GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS				
+				END
+				PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+					// find what payload is here (there might be different ones in different headers)
+					CLEAR_ARRAY payloads_here
+					payloads_in_this_header=0
+					GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode
+						PATCH_IF VARIABLE_IS_SET $"payloads_%resource%"("%opcode%") BEGIN
+							payloads_in_this_header=1
+							SET $payloads_here("%opcode%")=1
+						END ELSE
+						PATCH_IF (opcode=6||opcode=10||opcode=15||opcode=19||opcode=44||opcode=49) && VARIABLE_IS_SET $"payloads_%resource%"(700) BEGIN
+							payloads_in_this_header=1
+							SET $payloads_here(700)=1
+						END
+					END
+					PATCH_IF payloads_in_this_header BEGIN
+						// get the contents
+						READ_SHORT ab_off+0x20 fx_index
+						READ_SHORT ab_off+0x1e fx_count
+						READ_LONG 0x6a fx_offset
+						READ_ASCII (fx_offset + 0x30*fx_index) data (0x30*fx_count)
+						PHP_EACH payloads_here AS payload=>discard BEGIN
+							PATCH_IF VARIABLE_IS_SET $msectype_array("%payload%") BEGIN 
+								INNER_ACTION BEGIN
+									// make the subspell
+									LAF find_subspell_name STR_VAR parent="%resref%" RET subspell END
+									CREATE spl "%subspell%"
+										INSERT_BYTES 0x72 0x28
+										WRITE_LONG 0x6a (0x72+0x28)
+										WRITE_SHORT 0x68 1
+										WRITE_SHORT 0x82 1
+										WRITE_SHORT 0x98 1
+										WRITE_SHORT 0x90 fx_count
+										INSERT_BYTES (0x72+0x28) (0x30*fx_count)
+										WRITE_ASCII (0x72+0x28) "%data%"
+										LPF apply_persistent_changes INT_VAR include_all_cosmetics remove_probs_saves=1 STR_VAR parent_resource="%resref%" RET matched_anything END
+										LPF reorder_324s STR_VAR resref="%subspell%" END
+									ACTION_IF !matched_anything BEGIN // guard against an edge case (two copies of the same opcode, one with no persistent effect - e.g Chromatic orb Blindness)
+										DELETE "override/%subspell%.spl"
+										ACTION_IF telemetry BEGIN
+											APPEND_OUTER "weidu_external/data/dw_shared/dw_opcode_log.txt" "No persistent effect detected in payload %payload% of %resource% header %ab_ind%"
+											PRINT "No persistent effect detected in payload %payload% of %resource% header %ab_ind%"
+										END
+									END ELSE BEGIN 
+										APPEND_OUTER "weidu_external/data/dw_shared/dw_opcodes_persistent_subspells.2da" "%resource%%TAB%%subspell%"
+
+										// strip the persistent effects from the main item and get it to cast the subspell
+										COPY_EXISTING "%resource%" "override" // we need to be a bit delicate here, as we're copying the resource inside a previous copying of itself. This is legal (I believe!)
+																			  // since we're copying to different places.
+											
+											// we don't need or want to do a top-level ability loop since we're already *in* an ability loop for this resource, just on the outermost COPY_EXISTING -
+											GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+											177_count=0
+											// in case of ability drain, change all drain blocks to 700; audit for 177s
+											GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+											PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+												READ_SHORT fx_off opcode
+												PATCH_IF (opcode=6||opcode=10||opcode=15||opcode=19||opcode=44||opcode=49) BEGIN
+													WRITE_SHORT fx_off 700
+												END	ELSE
+												PATCH_IF opcode=177 BEGIN
+													READ_ASCII fx_off+0x14 177_resource
+													TO_UPPER 177_resource
+													PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%177_resource%") && $opcode_eff_arr("%177_resource%")=payload BEGIN
+														SPRINT 177_resource_to_match "%177_resource%"
+														++177_count
+													END
+												END						
+											END
+											// do the clone
+											PATCH_IF 177_count>0 BEGIN
+												LPF CLONE_EFFECT INT_VAR header=ab_ind multi_match=1 match_opcode=177 opcode=146 parameter1=0 parameter2=1 timing=1 duration=0 STR_VAR match_resource="%177_resource_to_match%" resource="%subspell%" insert=below END
+											END ELSE BEGIN
+												LPF CLONE_EFFECT INT_VAR header=ab_ind multi_match=1 match_opcode=payload opcode=146 parameter1=0 parameter2=1 timing=1 duration=0 STR_VAR resource="%subspell%" insert=below END
+											END
+											//filter
+											GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS // get it again, it may have changed
+											LPF filter_opcode_effects INT_VAR primary_opcode=payload mode=1 include_non_persistent=0 include_all_cosmetics END
+											LPF DELETE_EFFECT INT_VAR header=ab_ind match_opcode=999 END
+											PATCH_IF payload=700 BEGIN
+												LPF DELETE_EFFECT INT_VAR header=ab_ind match_opcode=700 END
+											END	
+									END
+								END
+							END
+						END
+					END
+				END	
+
+		END
+		
+	END
+END
+
+///////////////////////////////////////////////////////
+/*
+The core set of changes for separated-out subspells.
+
+Not particularly encapsulated; split into a function so I can use it for both items
+and spells.
+
+*/
+//////////////////////////////////////////////////////////
+
+DEFINE_PATCH_FUNCTION apply_dismember_changes STR_VAR parent_resource="" RET multiple_payload_effects saves probs BEGIN
+	multiple_payload_effects=0
+	persistent_effects=0
+	saves=0
+	probs=0
+	WRITE_LONG 0x8 "-1"
+	GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+	PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+		WRITE_SHORT ab_off+0x26 1 // switch off projectile
+		GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+		LPF filter_opcode_effects INT_VAR primary_opcode=payload mode=0 include_primary=1 STR_VAR parent_resource RET payload_count persistence_check 177_count END
+		multiple_payload_effects=multiple_payload_effects || (payload_count>1)
+		persistent_effects=persistent_effects || persistence_check
+	END
+	// only add a sectype if there are persistent effects to remove
+	PATCH_IF persistent_effects && VARIABLE_IS_SET $msectype_array("%payload%") BEGIN
+		WRITE_BYTE 0x27 $msectype_array("%payload%")
+	END
+	LPF DELETE_EFFECT INT_VAR match_opcode=999 END
+	PATCH_IF multiple_payload_effects BEGIN // in this case (where the primary opcode is used multiple times) we have to do some homework
+		PATCH_IF telemetry BEGIN
+			PATCH_PRINT "multiple payload effects on %SOURCE_FILE% (payload=%payload%)"
+		END
+		LPF audit_multiple_payload_effects INT_VAR payload RET saves probs END
+		PATCH_IF saves && probs BEGIN
+			// leave everything in place
+		END ELSE
+		PATCH_IF saves BEGIN
+			// remove probability data, leave saves
+			LPF ALTER_EFFECT INT_VAR probability1=100 probability2=0 END
+		END ELSE
+		PATCH_IF probs BEGIN
+			// remove save data, leave probability data
+			LPF ALTER_EFFECT INT_VAR savingthrow=0 savebonus=00 END		
+		END ELSE BEGIN
+			LPF ALTER_EFFECT INT_VAR probability1=100 probability2=0 savingthrow=0 savebonus=0 END						
+		END
+	END ELSE BEGIN // in this case, we just let the payload manage the probabilities and saving throws
+		LPF ALTER_EFFECT INT_VAR probability1=100 probability2=0 savingthrow=0 savebonus=0 END						
+	END
+	PATCH_IF payload=39 BEGIN
+		LPF CLONE_EFFECT INT_VAR multi_match=1 silent=1 match_opcode=39 opcode=324 resist_dispel=0 power=0 special=0 dicenumber=0 dicesize=0 timing=0 duration=1 parameter1=$opcode_splstate_map(nausea) parameter2=110 match_special=126 STR_VAR resource="%subspell%" END
+		LPF CLONE_EFFECT INT_VAR multi_match=1 silent=1 match_opcode=39 opcode=324 resist_dispel=0 power=0 special=0 dicenumber=0 dicesize=0 timing=0 duration=1 parameter1=$opcode_splstate_map(39) parameter2=110 match_special=14 STR_VAR resource="%subspell%" END
+	END ELSE
+	PATCH_IF payload=216 BEGIN
+		LPF ADD_SPELL_EFFECT INT_VAR insert_point=0 target=2 opcode=324 timing=0 duration=1 parameter1=0 parameter2=ldi_stat STR_VAR resource="%subspell%" END
+	END ELSE // note that this also applies for haste/slow
+	PATCH_IF VARIABLE_IS_SET $opcode_splstate_map("%payload%") BEGIN
+		LPF ADD_SPELL_EFFECT INT_VAR insert_point=0 target=2 opcode=324 timing=0 duration=1 parameter1=$opcode_splstate_map("%payload%") parameter2=110 STR_VAR resource="%subspell%" END
+	END ELSE
+	PATCH_IF payload=25 BEGIN
+		LPF ADD_SPELL_EFFECT INT_VAR insert_point=0 target=2 opcode=324 timing=0 duration=1 parameter1=0 parameter2=77 STR_VAR resource="%subspell%" END	
+	END
+	
+	// for Haste or Slow, add (silent) immunity if the appropriate State is set, remove any previous iteration, and if appropriate, display a 'Haste negated by slow' or vice versa string
+	PATCH_IF payload=16 BEGIN
+		LPF ADD_SPELL_EFFECT INT_VAR insert_point=0 target=2 opcode=318 parameter1=0x00010000 parameter2=138 timing=0 duration=1 STR_VAR resource="%subspell%" END
+		LPF ADD_SPELL_EFFECT INT_VAR insert_point=0 target=2 opcode=326 parameter1=0x00010000 parameter2=138 timing=0 duration=1 STR_VAR resource="dw_neg40" END
+		LPF ADD_SPELL_EFFECT INT_VAR insert_point=0 target=2 opcode=221 parameter1=10 parameter2=$msectype_array(16) timing=1 duration=0 END
+	END ELSE
+	PATCH_IF payload=40 BEGIN
+		LPF ADD_SPELL_EFFECT INT_VAR insert_point=0 target=2 opcode=318 parameter1=0x00008000 parameter2=138 timing=0 duration=1 STR_VAR resource="%subspell%" END					
+		LPF ADD_SPELL_EFFECT INT_VAR insert_point=0 target=2 opcode=326 parameter1=0x00008000 parameter2=138 timing=0 duration=1 STR_VAR resource="dw_neg16" END
+		LPF ADD_SPELL_EFFECT INT_VAR insert_point=0 target=2 opcode=221 parameter1=10 parameter2=$msectype_array(40) timing=1 duration=0 END
+	END
+	// target should be 2 
+	LPF ALTER_EFFECT INT_VAR silent=1 target=2 END 
+
+
+
+
+END
+
+///////////////////////////////////////////////////////
+/*
+The core set of changes for subspells containing persistent effects.
+
+Not particularly encapsulated; split into a function so I can use it for both items
+and spells.
+
+*/
+//////////////////////////////////////////////////////////
+
+
+DEFINE_PATCH_FUNCTION apply_persistent_changes INT_VAR include_all_cosmetics=0 remove_probs_saves=0 STR_VAR parent_resource="" RET matched_anything BEGIN
+	matched_anything=0
+	WRITE_LONG 0x8 "-1"
+	WRITE_BYTE 0x27 $msectype_array("%payload%")
+	GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+	PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+		WRITE_SHORT ab_off+0x26 1 // switch off projectile
+		GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+		LPF filter_opcode_effects INT_VAR primary_opcode=payload mode=0 include_non_persistent=0 include_all_cosmetics STR_VAR parent_resource RET matched_anything_here=matched_anything END
+		matched_anything = matched_anything || matched_anything_here
+	END
+	LPF DELETE_EFFECT INT_VAR match_opcode=999 END
+	PATCH_IF remove_probs_saves && matched_anything BEGIN
+		LPF ALTER_EFFECT INT_VAR savingthrow=0 probability1=100 probability2=0 savebonus=0 END		
+	END	
+	// target should be 2 
+	LPF ALTER_EFFECT INT_VAR silent=1 target=2 END 
+
+
+END
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// 
+// The main opcode_pass patch function
+
+/* What this pass needs to do:
+
+(1) remove any redundant (because repeated unnecessarily) blocks
+(2) absorb any icons into their associated opcode and remove any redundant strings that are already coded in the opcode
+(3) for a 101 effect, ensure that all string and icon immunities are present, and add a spellstate if appropriate
+(4) for a cure effect, ensure that it removes any appropriate icon and the appropriate spellstate
+(5) carry out a diagnosis to work out if the block contains a removeable or blockable effect, and if so, what level of complexity is
+involved in that removal.
+
+We assume the array fx_arr to be already loaded.
+*/
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+DEFINE_PATCH_FUNCTION opcode_pass_core
+	INT_VAR undroppable=0 // set to 1 for an undroppable creature-defense effect
+			fx_version=1 // set to 2 for cre effects
+	RET block_remove_type
+		delta_here
+		persistent_removable
+		multiple_payload_iterations
+		reorder_324s
+	RET_ARRAY payloads
+BEGIN
+	reorder_324s=0
+	fx_length = (fx_version=1) ? 0x30 : 0x108
+	count_blocks=0
+	delta_here=0 // count of number of effects added to the main part of the block
+	SPRINT front "" // the data to be added at the front
+	////////////////////////////////////////////////////////////////////////
+	// first pass - here we collect data and look for redundancies
+	/////////////////////////////////////////////////////////////////////////
+	persistent=0
+	simple=1
+	payload_count=0
+	payload_icon=0
+	removable=0
+	payload="-1"
+	ability_drain=0
+	deletions=0
+	damage=0
+	persistent_removable=0
+	has_haste_slow=0
+	poison_324_already_done=0
+	multiple_payload_iterations=0
+	CLEAR_ARRAY payloads
+	PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+		++count_blocks
+		//fx_off += delta * fx_length
+		PATCH_IF fx_ind=0 BEGIN
+			fx_off_top=fx_off
+		END
+		READ_SHORT fx_off opcode
+		PATCH_IF opcode=177 BEGIN
+			READ_ASCII fx_off+0x14 resource
+			TO_UPPER resource
+			PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%resource%") BEGIN
+				opcode=$opcode_eff_arr("%resource%")
+			END
+		END
+		has_haste_slow = has_haste_slow || opcode=16 || opcode=40
+		SET $opcode_arr("%fx_ind%")=opcode
+		SET $opcodes_in_this_block("%opcode%")=1
+		////////////////////////
+		/// First task: look for a primary payload (something either blockable or removable), and not with an equipped duration
+		//////////////////////////
+		PATCH_IF VARIABLE_IS_SET $opcode_splstate_map("%opcode%") BEGIN
+			splstate=$opcode_splstate_map("%opcode%")
+			SPRINT $splstate_checks_needed_in_this_block("%splstate%") ""
+		END
+		PATCH_MATCH "%opcode%" WITH
+		// removable opcodes
+		5 //charm
+		16 //haste
+		//20 //invisibility = we don't bother because Invisibility has no associated persistent effects
+		24 //fear
+		25 //poison
+		38 //silence
+		39 //sleep
+		40 //slow
+		45 //stun
+		74 //blindness
+		76 //feeblemind
+		78//disease
+		80 //deafness
+		94 //drunkenness
+		109 //paralysis
+		128 //confusion
+		175 //hold	
+		216 //energy drain
+		// variants of those
+		210 // PW:stun
+		216 // PW:sleep
+		BEGIN
+			PATCH_IF !(payload=opcode) && !(BYTE_AT (fx_off+0xc) = 2) BEGIN
+				payload_count+=1
+				payload=opcode
+				SET $payloads("%opcode%")=1
+				READ_BYTE (0x2+fx_off) target
+				READ_LONG (0x2c+fx_off) payload_icon
+				removable=1
+			END 
+		END
+		// ability drain counts as one payload
+		6   // ability drain
+		10
+		15
+		19
+		44
+		49
+		BEGIN
+			READ_LONG fx_off+0x4 param1
+			READ_LONG fx_off+0x8 param2
+			READ_BYTE fx_off+0xc timing
+			READ_LONG fx_off+0xe duration
+			PATCH_IF ((param2=1 && param1<=5) || (param2=0 && param1<0)) && timing=0 && duration>6 BEGIN // reduces ability or sets it to 5 or less; temporary but persists long enough to be removable
+				ability_drain=1
+				payload=700 // virtual opcode for ability drain
+				READ_BYTE fx_off+0x12 prob1
+				READ_BYTE fx_off+0x13 prob2
+				SET $payloads(700)=1
+				READ_BYTE (0x2+fx_off) target
+				removable=1
+			END
+		END
+		// other opcodes we protect againsts
+		55 // slay
+		134 // petrify
+		238 // disintegrate
+		209 // PW:kill
+		154 // entanglement
+		157 // web
+		BEGIN
+			PATCH_IF !(payload=opcode) && !(BYTE_AT (fx_off+0xc) = 2) BEGIN
+				payload_count+=1
+				payload=opcode
+				SET $payloads("%opcode%")=1
+				READ_BYTE (0x2+fx_off) target
+			END
+		END	
+		//icons
+		142 BEGIN
+			READ_LONG fx_off+0x8 icon
+			SPRINT $icons_in_this_block("%icon%") ""
+			SET $icon_at_this_index("%fx_ind%")=icon
+		END
+		// strings
+		139 BEGIN
+			READ_LONG fx_off+0x4 strref
+			SPRINT $strrefs_in_this_block("%strref%") ""
+			SET $strref_at_this_index("%fx_ind%")=strref
+		END
+		// prevented icons
+		169 BEGIN
+			READ_LONG fx_off+0x8 icon
+			SPRINT $icons_prevented_in_this_block("%icon%") ""	
+			SET $icon_at_this_index("%fx_ind%")=icon	
+		END
+		// removed icons
+		240 BEGIN
+			READ_LONG fx_off+0x8 icon
+			SPRINT $icons_removed_in_this_block("%icon%") ""	
+			SET $icon_at_this_index("%fx_ind%")=icon	
+		END
+		// prevented strings
+		267 BEGIN
+			READ_LONG fx_off+0x4 strref
+			SPRINT $strrefs_prevented_in_this_block("%strref%") ""
+			SET $strref_at_this_index("%fx_ind%")=strref
+		END	
+		// immunities
+		101 BEGIN
+			READ_LONG fx_off+0x8 immune_to
+			SPRINT $opcodes_prevented_in_this_block("%immune_to%") ""
+			SET $opcode_prevented_at_this_index("%fx_ind%")=immune_to
+			PATCH_IF VARIABLE_IS_SET $opcode_splstate_map("%immune_to%") BEGIN
+				splstate=$opcode_splstate_map("%immune_to%")
+				SPRINT $splstates_imposed_in_this_block("%splstate%") ""
+			END
+			PATCH_IF immune_to=39 BEGIN
+				splstate=$opcode_splstate_map(nausea)
+				SPRINT $splstates_imposed_in_this_block("%splstate%") ""
+			END
+		END	
+		DEFAULT
+			// check for cures
+			PHP_EACH opcode_removal_map AS k=>v BEGIN
+				PATCH_IF opcode=k BEGIN
+					SPRINT $opcodes_removed_in_this_block("%v%") ""
+				END
+			END
+		END
+		////////////////////////////////
+		// now check for redundancy
+		////////////////////////////////
+		PATCH_MATCH "%opcode%" WITH 
+		50 61 141 142 169 233 240 282// opcodes that don't stack and use param1,param2, but not resource or special
+		BEGIN
+			READ_ASCII fx_off data (0x2c)
+			INNER_PATCH_SAVE data "%data%" BEGIN
+				WRITE_ASCII 0x14 ""
+			END
+		END
+		139 267 // opcodes that don't stack and use param1, but not param2 resource or special
+		BEGIN
+			READ_ASCII fx_off data (0x2c)
+			INNER_PATCH_SAVE data "%data%" BEGIN
+				WRITE_LONG 0x8 0
+				WRITE_ASCII 0x14 ""
+			END
+		END
+		83 101 144 197 198 // opcodes that don't stack and use param2, but not param1, resource or special
+		BEGIN
+			READ_ASCII fx_off data (0x2c)
+			INNER_PATCH_SAVE data "%data%" BEGIN
+				WRITE_LONG 0x4 0
+				WRITE_ASCII 0x14 ""
+			END
+		END
+		172 174 206 296 // opcodes that don't stack and use resource, but not param1/2 or special
+		BEGIN
+			READ_ASCII fx_off data (0x2c)
+			INNER_PATCH_SAVE data "%data%" BEGIN
+				WRITE_LONG 0x4 0
+				WRITE_LONG 0x8 0
+			END
+		END
+		215 318 324 328 BEGIN // opcodes that use basically everything
+			READ_ASCII fx_off data (fx_length)		
+		END
+		DEFAULT
+			SPRINT data ""
+		END
+		PATCH_IF "%data%" STR_CMP "" BEGIN
+			PATCH_IF VARIABLE_IS_SET $verbatim_in_this_block("%data%") BEGIN
+				WRITE_SHORT fx_off 999
+				deletions=1
+				SET $icon_at_this_index("%fx_ind%")="-1"
+				SET $strref_at_this_index("%fx_ind%")="-1"
+				SET $opcode_prevented_at_this_index("%fx_ind%")="-1"
+				SET $opcode_arr("%fx_ind%")="-1"
+			END ELSE BEGIN
+				SPRINT $verbatim_in_this_block("%data%") ""
+			END
+		END
+	END
+	payload_count += ability_drain
+	multiple=(payload_count>1)
+	////////////////////////////////
+	// do a second pass (but skip unless there is a single blockable/removable payload)
+	////////////////////////////////
+	PATCH_IF payload_count=1 BEGIN
+		payload_found=0
+		PHP_EACH opcode_arr AS fx_ind=>opcode BEGIN
+			fx_off=$fx_arr("%fx_ind%")
+			PATCH_IF opcode=177 BEGIN
+				READ_ASCII (fx_off+0x14) resource
+				TO_UPPER resource
+				PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%resource%") BEGIN
+					opcode=$opcode_eff_arr("%resource%")
+				END
+			END
+			READ_BYTE (fx_off+0x2) target_here
+			PATCH_IF target_here=target BEGIN
+				PATCH_MATCH "%opcode%" WITH
+				"%payload%" 
+				BEGIN
+					PATCH_IF !payload_found BEGIN
+						payload_found=1
+						READ_ASCII (fx_off+0x1c) opcode_sig (0x10)
+					END ELSE BEGIN // more than one iteration of the payload
+						multiple_payload_iterations=1
+					END
+				END
+				142
+				BEGIN
+					// this can be removed directly
+				END
+				7 8 9 50 51 52 61 66 // color glows
+				141 //sparkles
+				170 // damage animation
+				174 // play sound
+				215 // play graphic
+				269 // shake screen
+				287 // remove selection circle
+				321 // spell removal
+				327 // IWD graphic effect
+				BEGIN
+					READ_BYTE 0xc+fx_off timing
+					PATCH_IF (timing=4 || timing=0) && LONG_AT (0xe+fx_off)>6 BEGIN
+						persistent=1
+					END
+				END
+				206 318 324 BEGIN // spell immunities
+					READ_BYTE 0xc+fx_off timing
+					PATCH_IF (timing=4 || timing=0) && LONG_AT (0xe+fx_off)>6 BEGIN
+						READ_ASCII (fx_off+0x14) resref
+						persistent=!("%resref%" STR_EQ "%SOURCE_RES%")
+					END
+				END
+			    328 // spell states 
+				BEGIN
+					READ_BYTE 0xc+fx_off timing
+					PATCH_IF (timing=4 || timing=0) && LONG_AT (0xe+fx_off)>6 BEGIN
+						READ_LONG (fx_off+0x8) splstate
+						PATCH_MATCH "%payload% %splstate%" WITH
+						"39 0" //hopelessness
+						BEGIN
+							persistent=1
+						END
+						DEFAULT
+						END
+					
+					END
+				END
+				139  //display string
+				BEGIN
+					READ_BYTE 0xc+fx_off timing
+					PATCH_IF timing=4 && LONG_AT (0xe+fx_off)>6 BEGIN
+						persistent=1
+					END
+				
+				END
+				12 BEGIN
+					PATCH_IF payload=55 BEGIN // slay can have secondary magic damage
+						damage=!(SHORT_AT (0xa+fx_off)=64)
+					END ELSE BEGIN
+						damage=1
+					END
+				END				
+				235 BEGIN
+					// wing buffet needn't be separated from sleep
+					simple = simple && payload=39
+				END
+			
+				146 BEGIN
+					// a few hardcoded exceptions (well, one at time of writing)
+					PATCH_IF !("%SOURCE_RES%" STR_EQ SPPR610) BEGIN
+						// also except any persistent subspells from previous runs
+						SPRINT resource "%SOURCE_FILE%"
+						TO_UPPER resource
+						READ_ASCII (0x14+fx_off) subspell
+						TO_UPPER subspell
+						simple=VARIABLE_IS_SET $subspell_list("%resource%" "%subspell%")
+					END
+				END
+				DEFAULT
+					PATCH_MATCH "%payload%" WITH
+					700 BEGIN // ability drain
+						simple=simple && (opcode=6||opcode=10||opcode=15||opcode=19||opcode=44||opcode=49||opcode=54||opcode=0)  // ability drain also allows a THAC0/AC drain secondary
+						persistent=1
+					END
+					16 // haste
+					BEGIN
+						simple=simple && (opcode=93) // haste permits fatigue 
+					END
+					24 // panic
+					BEGIN
+						simple = simple && (opcode=106 || opcode=23 || opcode=54)
+						persistent = persistent || (opcode=106 || opcode=54)
+					END	
+					25 // poison 
+					BEGIN
+						simple=simple && (opcode=13) // occasional sudden-death poisons
+					END
+					40 // slow 
+					BEGIN
+						simple=simple && (opcode=0 || opcode=54 || opcode=240 ||opcode=158 ) // slow permits a grease overlay and THAC0, AC reduction as secondary. It also (pointlessly but harmlessly) permits icon removal
+						persistent=(opcode=0 || opcode=54 || opcode=240 ||opcode=158 )
+					END
+					55 // slay
+					BEGIN
+						PATCH_IF opcode=168 || opcode=215 BEGIN // permits instakill of summons - these are actually 177s
+							READ_ASCII (fx_off+0x14) resource
+							simple=("%resource%" STR_EQ "DESTSELF" || "%resource%" STR_EQ "FINGER")						
+						END ELSE BEGIN
+							simple=0
+						END
+					END
+					76 // feebleminded
+					BEGIN
+						PATCH_IF opcode=177 BEGIN // saving throw penalty for spiritual lock
+							READ_ASCII (fx_off+0x14) resource
+							simple=("%resource%" STR_EQ "BDSPIRIT")				
+						END ELSE BEGIN
+							simple=0
+						END
+					END
+					154 // entanglement
+					BEGIN
+						simple=simple && (opcode=0 || opcode=126) // entanglement permits movement and AC penalties
+						// entanglement can't be removed so we don't set persistent
+					END
+					DEFAULT
+						simple=0
+					END
+				END
+			END
+		END
+	END // end of second pass
+	
+	//////////////////////////////////////////////
+	// report for block/remove type
+	///////////////////////////////////////////////
+	
+	PATCH_IF payload_count=0 BEGIN
+		SPRINT block_remove_type "skip"
+	END ELSE
+	PATCH_IF has_haste_slow BEGIN
+		SPRINT block_remove_type "haste_slow"
+	END ELSE
+	PATCH_IF payload_count=1 BEGIN
+		PATCH_IF !simple BEGIN
+			SPRINT block_remove_type "complex"
+		END ELSE BEGIN
+			SPRINT block_remove_type "simple"
+		END
+	END ELSE BEGIN
+		SPRINT block_remove_type "multiple"
+	END
+	persistent_removable=persistent && removable
+
+	//////////////////////////////////////////////
+	// Third pass. Here we want to consolidate icons/strings,
+	// and handle any oddities associated with 101 and removal effects
+	///////////////////////////////////////////////
+	reorder_324s=0
+	PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+		opcode=$opcode_arr("%fx_ind%")
+		fx_off += delta_here * fx_length
+		PATCH_MATCH "%opcode%" WITH
+		//////////////////////////////
+		//// icons - may be redundant
+		///////////////////////////////
+		142 BEGIN
+			icon=$icon_at_this_index("%fx_ind%")
+			PATCH_MATCH "%icon%" WITH
+			0 1 43 BEGIN //charm
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("5")
+			END
+			14 126 BEGIN // sleep/nausea
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("39")
+			END
+			55 BEGIN // stun
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("45")
+			END
+			38 110 BEGIN // haste
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("16") || VARIABLE_IS_SET $opcodes_in_this_block("317")
+			END
+			8 BEGIN // blind
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("74")
+			END
+			41 BEGIN // slow
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("40")
+			END
+			13 BEGIN //hold
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("175") || VARIABLE_IS_SET $opcodes_in_this_block("185")
+			END
+			6 BEGIN //poison
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("25")
+			END
+			7 BEGIN //disease
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("78")
+			END
+			56 87 BEGIN //regeneration
+				delete=VARIABLE_IS_SET $opcodes_in_this_block("98")
+			END
+			DEFAULT
+				delete=0
+			END
+			PATCH_IF delete BEGIN
+				WRITE_SHORT fx_off 999
+				SET $opcode_arr("%fx_ind%")=999
+				deletions=1
+			END
+		END
+		// these are damage or damage-related opcodes that need to move to the front if the block is otherwise simple
+		12 // damage
+		170 // play damage animation
+		269 // shake screen - associated with damage for blockable/removable with extra damage (i.e. not blocked)
+		BEGIN 
+			PATCH_IF simple && damage BEGIN
+				READ_ASCII fx_off data (fx_length)
+				WRITE_SHORT fx_off 999
+				deletions=1
+				SPRINT front "%front%"^"%data%"
+			END			
+		END
+		////////////////////////////////////
+		// haste, if advanced, needs to block other haste effects; whether or not advanced, needs to remove slow (but this should go *after* the haste effect)
+		// don't bother for on-equip effects
+		/////////////////////////////////////
+		16 BEGIN
+			PATCH_IF !(BYTE_AT (fx_off+0xc) = 2) BEGIN
+				READ_ASCII fx_off data (fx_length)						
+				INSERT_BYTES fx_off+0x30 fx_length	
+				WRITE_ASCII fx_off+0x30 "%data%"		
+				WRITE_SHORT fx_off+0x30 221
+				WRITE_LONG fx_off+0x34 10
+				WRITE_LONG fx_off+0x38 $msectype_array(40)
+				++delta_here
+				READ_LONG 0x8+fx_off type
+				PATCH_IF type=1 BEGIN
+					// READ_ASCII fx_off data (fx_length)	// we've already read it, no need to do it twice					
+					INSERT_BYTES fx_off fx_length
+					WRITE_ASCII fx_off "%data%"
+					WRITE_SHORT fx_off 328
+					WRITE_LONG fx_off+0x8 $opcode_splstate_map(16)
+					WRITE_LONG fx_off+0x2c 1
+					++delta_here
+				END
+			END
+		END
+		////////////////////////////////////
+		// sleep needs to set an icon, and record its type
+		/////////////////////////////////////
+		39 BEGIN
+			PATCH_IF VARIABLE_IS_SET $icons_in_this_block(130) BEGIN // unconscious
+				WRITE_LONG (fx_off+0x2c) 130
+				SPRINT sleep_type short_unconscious
+			END ELSE
+			PATCH_IF VARIABLE_IS_SET $icons_in_this_block(126) BEGIN // nausea
+				WRITE_LONG (fx_off+0x2c) 126	
+				SPRINT sleep_type nausea
+			END ELSE 
+			PATCH_IF VARIABLE_IS_SET $icons_in_this_block(14) BEGIN
+				WRITE_LONG (fx_off+0x2c) 14		
+				SPRINT sleep_type default
+			END	ELSE BEGIN
+				READ_LONG (fx_off+0x2c) icon
+				PATCH_IF icon=130 BEGIN
+					SPRINT sleep_type short_unconscious
+				END ELSE
+				PATCH_IF icon=126 BEGIN
+					SPRINT sleep_type nausea
+				END ELSE
+				PATCH_IF icon=14 BEGIN
+					SPRINT sleep_type default
+				END ELSE BEGIN
+					SPRINT sleep_type short_unconscious
+				END
+			END
+		END
+		////////////////////////////////////
+		// slow needs to remove haste (should go *after* the slow effect)
+		// don't bother for an on-equip effect
+		/////////////////////////////////////
+		40 BEGIN
+			PATCH_IF !(BYTE_AT (fx_off+0xc) = 2) BEGIN
+				READ_ASCII fx_off data (fx_length)						
+				INSERT_BYTES fx_off+0x30 fx_length	
+				WRITE_ASCII fx_off+0x30 "%data%"		
+				WRITE_SHORT fx_off+0x30 221
+				WRITE_LONG fx_off+0x34 10
+				WRITE_LONG fx_off+0x38 $msectype_array(16)
+				++delta_here
+			END
+		END
+		////////////////////////////////////
+		// disease needs to set an icon.\
+		// if it's using 'mold touch', we want to make the referent of the subspell explicit
+		/////////////////////////////////////
+		78 BEGIN
+			PATCH_IF VARIABLE_IS_SET $icons_in_this_block(7) BEGIN
+				WRITE_LONG (fx_off+0x2c) 7
+				READ_LONG (fx_off+0x8) type
+				PATCH_IF type=11 || type=12 BEGIN
+					READ_ASCII (fx_off+0x14) resource
+					PATCH_IF "%resource%" STR_EQ "" BEGIN
+						WRITE_ASCII (fx_off+0x14) "%SOURCE_RES%B"
+					END
+				END
+			END
+		END
+		//////////////////////////////////////
+		// regeneration needs to set an icon
+		///////////////////////////////////////
+		98 BEGIN
+			PATCH_IF VARIABLE_IS_SET $icons_in_this_block(56) BEGIN
+				WRITE_LONG (fx_off+0x2c) 56			
+			END ELSE
+			PATCH_IF VARIABLE_IS_SET $icons_in_this_block(87) BEGIN
+				WRITE_LONG (fx_off+0x2c) 87			
+			END
+		END
+
+		//////////////////////////
+		///// strings
+		///////////////////////////
+		139 BEGIN // strings
+			READ_LONG (fx_off+0x4) strref
+			PATCH_IF strref=16233 BEGIN //// the potion-drinking string needs to be moved to the front
+				READ_ASCII fx_off data (fx_length)
+				WRITE_SHORT fx_off 999
+				deletions=1
+				SPRINT front "%front%"^"%data%"
+			END
+		END
+		///////////////////////////
+		// immunity effects
+		///////////////////////////
+		101 BEGIN 
+			immune_to=$opcode_prevented_at_this_index("%fx_ind%")
+			// general task: make sure icon and string immunities are in place
+			PATCH_IF !undroppable BEGIN
+				PHP_EACH opcode_icons AS k=>discard BEGIN
+					PATCH_IF k_0=immune_to && !VARIABLE_IS_SET $icons_prevented_in_this_block("%k_1%") BEGIN
+						READ_ASCII fx_off data (fx_length)						
+						INSERT_BYTES fx_off fx_length
+						WRITE_ASCII fx_off "%data%"
+						WRITE_SHORT fx_off 169
+						WRITE_LONG fx_off+0x8 k_1
+						++delta_here
+						fx_off +=fx_length						
+					END
+				END
+			END
+			PHP_EACH opcode_strrefs AS k=>discard BEGIN
+				PATCH_IF k_0=immune_to && !VARIABLE_IS_SET $strrefs_prevented_in_this_block("%k_1%") BEGIN
+					READ_ASCII fx_off data (fx_length)						
+					INSERT_BYTES fx_off fx_length
+					WRITE_ASCII fx_off "%data%"
+					WRITE_SHORT fx_off 267
+					WRITE_LONG fx_off+0x4 k_1
+					WRITE_LONG fx_off+0x8 0
+					++delta_here
+					fx_off +=fx_length
+				END				
+			END
+			// if appropriate, add a spellstate
+			splstate="-1"
+			PATCH_MATCH "%immune_to%" WITH
+			39 BEGIN // sleep
+			/*
+			Sleep is complicated because of overloading.
+			We can be immune to (each includes those below):
+			- opcode 39, flatly [anything immune to 235]
+			- the special Ixil and Earthquake effects [min-hp1 monsters]
+			- nausea-coded sleep [undroppable items, anything giving immunity to the Nauseated icon]
+			- mental-effect-coded sleep (including Hopelessness) [anything else]
+			*/
+				// everything sets the sleep spellstate
+				splstate=$opcode_splstate_map(39)
+				PATCH_IF VARIABLE_IS_SET $opcodes_prevented_in_this_block(235) BEGIN
+					// insert the antinausea splstate
+					READ_ASCII fx_off data (fx_length)						
+					INSERT_BYTES fx_off fx_length
+					WRITE_ASCII fx_off "%data%"
+					WRITE_SHORT fx_off 328
+					WRITE_LONG fx_off+0x8 $opcode_splstate_map(nausea)
+					WRITE_LONG fx_off+0x2c 1
+					++delta_here	
+					fx_off +=fx_length
+				END ELSE 
+				PATCH_IF VARIABLE_IS_SET $opcodes_in_this_block(208) BEGIN
+					// overwrite the opcode with the antinausea splstate
+					WRITE_SHORT fx_off 328
+					WRITE_LONG fx_off+0x8 $opcode_splstate_map(nausea)
+					WRITE_LONG fx_off+0x2c 1
+					// add immunity to the special spells
+					READ_ASCII fx_off data (fx_length)						
+					INSERT_BYTES fx_off fx_length
+					WRITE_ASCII fx_off "%data%"
+					WRITE_SHORT fx_off 324
+					WRITE_LONG fx_off+0x8 0
+					WRITE_ASCII fx_off+0x14 "dw-ixil"
+					++delta_here	
+					fx_off +=fx_length
+					INSERT_BYTES fx_off fx_length
+					WRITE_ASCII fx_off "%data%"
+					WRITE_SHORT fx_off 324
+					WRITE_LONG fx_off+0x8 0
+					WRITE_ASCII fx_off+0x14 "dw-quake"
+					++delta_here	
+					fx_off +=fx_length					
+				END ELSE
+				PATCH_IF undroppable || VARIABLE_IS_SET $icons_prevented_in_this_block(126) BEGIN
+					// overwrite the opcode with the antinausea splstate
+					WRITE_SHORT fx_off 328
+					WRITE_LONG fx_off+0x8 $opcode_splstate_map(nausea)
+					WRITE_LONG fx_off+0x2c 1
+				END ELSE BEGIN
+					// remove the opcode
+					WRITE_SHORT fx_off 999
+					deletions=1
+				END
+			END
+			209 // power words - called out here just to flag the fact that
+			210 // (a) if we have immunity to, e.g., stun and PW:stun we don't need
+			216 // double splstates, and (b) in the really bizarre situation of something
+				// immune to PW stun and not stun, it shouldn't have the spellstate
+			BEGIN 
+			END
+			DEFAULT
+				PATCH_IF VARIABLE_IS_SET $opcode_splstate_map("%immune_to%") BEGIN
+					splstate=$opcode_splstate_map("%immune_to%")
+				END
+			END
+			PATCH_IF splstate>=0 BEGIN
+				READ_ASCII fx_off data (fx_length)						
+				INSERT_BYTES fx_off fx_length
+				WRITE_ASCII fx_off "%data%"
+				WRITE_SHORT fx_off 328
+				WRITE_LONG fx_off+0x8 splstate
+				WRITE_LONG fx_off+0x2c 1
+				++delta_here	
+				fx_off +=fx_length
+			END
+		END
+		///////////////////////////////////////////////////
+		/// remove any spell immunities no longer required
+		///////////////////////////////////////////////////
+		206 BEGIN 
+			READ_ASCII (fx_off + 0x14) resref
+			PATCH_MATCH "%resref%" WITH
+				SPWI305 // haste x 4
+				SPRA301 
+				SPIN828
+				SPIN572
+				SPWI613 // improved haste
+			BEGIN
+				delete=VARIABLE_IS_SET $opcodes_prevented_in_this_block(16) || VARIABLE_IS_SET $opcodes_in_this_block(16)
+			END
+				SPWI312 // slow
+				SPWISH25
+				SPIN983
+				SPWM164 
+				SPIN977 // Golem slow
+			BEGIN
+				delete=VARIABLE_IS_SET $opcodes_prevented_in_this_block(40)
+			END
+				SPWM111 // entangle
+				SPPR105
+				SPIN688 // plant growth
+				CDSW1H58 // not-actually-implemented Sword of Mask secspell
+				CDMOUND // not-actually-implemented Shambling Mound weapon subspell
+				CDHGNYA1 // not-actually-implemented secspell on Nyalee's staff
+			BEGIN
+				delete=VARIABLE_IS_SET $opcodes_prevented_in_this_block(154)
+			END
+			DEFAULT
+				delete=0
+			END
+			PATCH_IF delete BEGIN
+				WRITE_SHORT fx_off 999
+				deletions=1
+			END		
+		
+		END
+		///////////////////////////////////////////////////
+		/// remove any spell removals no longer required
+		///////////////////////////////////////////////////
+		321 BEGIN
+			READ_ASCII (fx_off + 0x14) resref
+			PATCH_MATCH "%resref%" WITH
+				SPWI312 // slow
+				SPWISH25
+				SPIN983
+				SPWM164 
+				SPIN575 // vortex web
+				SPIN977 // Golem slow		
+			BEGIN
+				delete=VARIABLE_IS_SET $opcodes_in_this_block(40)
+			END
+			DEFAULT
+				delete=0
+			END
+			PATCH_IF delete BEGIN
+				WRITE_SHORT fx_off 999
+				deletions=1
+			END		
+		
+		END
+		///////////////////////////////////////////////////
+		///
+		/// log the presence of any 318s that give immunity to the parent resource
+		///////////////////////////////////////////////////
+		318 BEGIN
+			READ_ASCII (fx_off+0x14) resref			
+			reorder_324s=reorder_324s || ("%resref%" STR_EQ "%SOURCE_RES%")
+		END
+		///////////////////////////////////////////////////
+		/// remove any spellstate checks we're about to reimpose
+		/// log the presence of any others that give immunity to the parent resource
+		///////////////////////////////////////////////////
+		324 BEGIN
+			READ_LONG (fx_off+0x4) parameter1
+			READ_LONG (fx_off+0x8) parameter2
+			PATCH_IF parameter2=110 BEGIN // check spellstate
+				PATCH_IF VARIABLE_IS_SET $splstate_checks_needed_in_this_block("%parameter1%") BEGIN
+					WRITE_SHORT fx_off 999
+					deletions=1
+				END ELSE
+				PATCH_IF ( parameter1=$opcode_splstate_map(39) || parameter1=$opcode_splstate_map(nausea) ) && VARIABLE_IS_SET $payloads(39) BEGIN
+					WRITE_SHORT fx_off 999
+					deletions=1
+				END
+			END ELSE
+			PATCH_IF parameter2=77 && VARIABLE_IS_SET $opcodes_in_this_block(25) BEGIN // poison (but we leave it in place in simple cases)
+				PATCH_IF simple BEGIN
+					poison_324_already_done=1				
+				END ELSE BEGIN
+					WRITE_SHORT fx_off 999
+					deletions=1
+				END
+			END ELSE
+			PATCH_IF parameter2=ldi_stat && VARIABLE_IS_SET $opcodes_in_this_block(216) BEGIN // leveldrain immunity
+				WRITE_SHORT fx_off 999
+				deletions=1			
+			END ELSE BEGIN
+				READ_ASCII (fx_off+0x14) resref			
+				reorder_324s=reorder_324s || ("%resref%" STR_EQ "%SOURCE_RES%")
+			END
+		END
+		///////////////////////////////////////////////////
+		/// remove any spellstates we're about to reimpose
+		///////////////////////////////////////////////////
+		328 BEGIN
+			READ_LONG (fx_off+0x8) splstate
+			PATCH_IF VARIABLE_IS_SET $splstates_imposed_in_this_block("%splstate%") BEGIN
+				WRITE_SHORT fx_off 999
+				deletions=1
+			END
+		END
+		///////////////////////////////////////////////////
+		/// remove any sectype zaps we're about to reimpose
+		///////////////////////////////////////////////////
+		221 BEGIN
+			READ_LONG fx_off+0x8 sectype_removed
+			PHP_EACH opcodes_removed_in_this_block AS k=>discard BEGIN
+				PATCH_IF VARIABLE_IS_SET $msectype_array("%k%") && sectype_removed=$msectype_array("%k%") BEGIN
+					WRITE_SHORT fx_off 999
+					deletions=1
+				END			
+			END
+			PATCH_IF VARIABLE_IS_SET $opcodes_removed_in_this_block(109) BEGIN
+				PATCH_IF sectype_removed=$msectype_array(175) BEGIN
+					WRITE_SHORT fx_off 999
+					deletions=1
+				END
+			END
+		END
+		DEFAULT
+		///////////////////////////////////////////////////
+		/// Go through the various cure effects
+		///////////////////////////////////////////////////
+			PATCH_IF VARIABLE_IS_SET $opcode_removal_map("%opcode%") BEGIN
+				removed=$opcode_removal_map("%opcode%")
+				// check that we are removing any relevant icons
+				PHP_EACH opcode_icons AS k=>discard BEGIN
+					PATCH_IF k_0=removed && !VARIABLE_IS_SET $icons_removed_in_this_block("%k_1%") BEGIN
+						READ_ASCII fx_off data (fx_length)						
+						INSERT_BYTES fx_off fx_length
+						WRITE_ASCII fx_off "%data%"
+						WRITE_SHORT fx_off 240
+						WRITE_LONG fx_off+0x8 k_1
+						++delta_here
+						fx_off +=fx_length
+					END
+				END
+				// add the cure-sectype effect
+				PATCH_IF VARIABLE_IS_SET $msectype_array("%removed%") BEGIN
+					READ_ASCII fx_off data (fx_length)						
+					INSERT_BYTES fx_off fx_length
+					WRITE_ASCII fx_off "%data%"
+					WRITE_SHORT fx_off 221
+					WRITE_LONG fx_off+0x4 10
+					WRITE_LONG fx_off+0x8 $msectype_array("%removed%")
+					++ delta_here
+					fx_off += fx_length
+					PATCH_IF removed=109 BEGIN // also do 175
+						READ_ASCII fx_off data (fx_length)						
+						INSERT_BYTES fx_off fx_length
+						WRITE_ASCII fx_off "%data%"
+						WRITE_SHORT fx_off 221
+						WRITE_LONG fx_off+0x4 10
+						WRITE_LONG fx_off+0x8 $msectype_array(175)
+						++ delta_here
+						fx_off += fx_length					
+					END
+				END
+			END
+
+		END
+
+	END // End of third pass
+
+
+	// carry out deletions
+	
+	
+	PATCH_IF deletions BEGIN
+		delete_count=0
+		FOR (fx_ind=0;fx_ind<count_blocks+delta_here;++fx_ind) BEGIN
+			fx_off=fx_off_top+fx_length * (fx_ind - delete_count)
+			PATCH_IF SHORT_AT fx_off = 999 BEGIN
+				DELETE_BYTES fx_off fx_length
+				++ delete_count
+			END
+		END
+		delta_here -= delete_count
+	END
+	
+
+	// At this point, if we're simple, add the immunity block on to the front
+	
+	PATCH_IF simple && payload_count=1 && (payload=25 || payload=216 || VARIABLE_IS_SET $opcode_splstate_map("%payload%") ) BEGIN
+		proceed=1
+		INNER_PATCH_SAVE imm_block "" BEGIN
+			INSERT_BYTES 0x0 fx_length
+			WRITE_SHORT 0x0 324
+			WRITE_BYTE 0x2 target
+			WRITE_LONG 0xe 1
+			WRITE_BYTE 0x12 100
+			PATCH_IF payload=39 BEGIN
+				WRITE_LONG 0x8 110
+				PATCH_MATCH "%sleep_type%" WITH
+				short_unconscious BEGIN 
+					proceed=0
+				END // no block to add here
+				nausea BEGIN
+					WRITE_LONG 0x4 $opcode_splstate_map(nausea)
+				END
+				DEFAULT
+					WRITE_LONG 0x4 $opcode_splstate_map(39)					
+				END
+			END ELSE
+			PATCH_IF VARIABLE_IS_SET $opcode_splstate_map("%payload%") BEGIN
+				WRITE_LONG 0x4 $opcode_splstate_map("%payload%")
+				WRITE_LONG 0x8 110
+			END ELSE
+			PATCH_IF payload=25 BEGIN
+				PATCH_IF poison_324_already_done BEGIN
+					proceed=0
+				END ELSE BEGIN
+					WRITE_LONG 0x8 77
+				END
+			END ELSE
+			PATCH_IF payload=216 BEGIN
+				WRITE_LONG 0x8 ldi_stat
+			END
+			WRITE_ASCII 0x14 "%SOURCE_RES%"
+		END
+		PATCH_IF proceed BEGIN
+			SPRINT front "%front%"^"%imm_block%"
+		END
+	END
+
+	
+	// add the front piece
+	PATCH_IF "%front%" STR_CMP "" BEGIN
+		front_length=STRING_LENGTH "%front%"
+		INSERT_BYTES fx_off_top front_length
+		WRITE_ASCII fx_off_top "%front%"
+		delta_here += (front_length / fx_length)
+
+
+	END
+	
+
+END
+
+
+DEFINE_PATCH_FUNCTION reorder_324s STR_VAR resref="%SOURCE_RES%" ext="%SOURCE_EXT%" BEGIN
+
+//	reorders the 318/324 blocks in a resource (extended header only) so that in any contiguous block of 318s and 324s giving immunity to the resource itself, any 324s that
+//	have parameter2=110 go last.
+	PATCH_IF "%ext%" STR_EQ "ITM" BEGIN
+		GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+	END ELSE BEGIN
+		GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+	END
+	PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+		GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+		in_block=0
+		PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+			read=0
+			write=0
+			READ_SHORT fx_off opcode
+			PATCH_IF !in_block BEGIN
+				PATCH_IF opcode=318 || opcode=324 BEGIN
+					READ_ASCII fx_off+0x14 resource
+					PATCH_IF "%resource%" STR_EQ "%resref%" BEGIN
+						in_block=1
+						insert_point=fx_off
+						SPRINT data_top ""
+						SPRINT data_bottom ""
+						read=1
+					END 
+				END
+			END ELSE BEGIN
+				PATCH_IF opcode=318 || opcode=324 BEGIN
+					READ_ASCII fx_off+0x14 resource
+					PATCH_IF "%resource%" STR_EQ "%resref%" BEGIN
+						read=1
+					END ELSE BEGIN
+						in_block=0
+						write=1
+					END
+				END ELSE BEGIN
+					in_block=0
+					write=1
+				END				
+			END
+			PATCH_IF read BEGIN
+				READ_ASCII fx_off data_here (0x30)
+				READ_LONG (fx_off+0x8) param2
+				PATCH_IF param2=110 BEGIN
+					SPRINT data_bottom "%data_bottom%"^"%data_here%"
+				END ELSE BEGIN
+					SPRINT data_top "%data_top%"^"%data_here%"
+				END		
+			END ELSE
+			PATCH_IF write BEGIN
+				SPRINT data "%data_top%"^"%data_bottom%"
+				WRITE_ASCII insert_point "%data%"
+			END		
+		END
+	END
+
+END
+
+
+// acts on an already-read block 'fx_arr'
+
+DEFINE_PATCH_FUNCTION filter_opcode_effects
+	INT_VAR primary_opcode="-1"
+			mode=0  //Mode 0 is include, i.e. set to 999 anything not part of the opcode. 
+					//Mode 1 is exclude, i.e. set to 999 anything that *is* part of it. 
+					//Mode 2 is diagnostic: it checks to see if all associated opcodes are later than all nonassociated opcodes and returns 1 if so.
+					//Mode 3 adds a splstate 324 block just before the first associated block
+			include_primary=0// do we include the primary opcode itself? 
+			include_non_persistent=1 /// do we include icons or anything transient (duration<=6)?
+			include_all_cosmetics=0 // if set to 1, select anything that has a duration>6 cosmetic effect (i.e. don't check if it's associated with this specific opcode)
+	STR_VAR parent_resource="%SOURCE_RES%"
+			current_resource="%SOURCE_RES%"
+	RET value
+		delta_here
+		payload_count
+		persistence_check // secondary return value, checks for any persistent effect associated to this primary opcode
+		177_count
+		matched_anything
+BEGIN
+	value=1
+	persistence_check=0
+	delta_here=0
+	found_match=0
+	payload_count=0
+	177_count=0
+	matched_anything=0
+	// start by finding the target of the payload
+	target=2
+	PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+		READ_SHORT fx_off opcode
+		PATCH_IF opcode=payload || (payload=700 && (opcode=6||opcode=10||opcode=15||opcode=19||opcode=44||opcode=49) ) BEGIN
+			target=BYTE_AT (fx_off+0x2)
+		END
+	END
+	PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+		persistent=0
+		is_177=0
+		fx_off +=delta_here * 0x30
+		PATCH_IF BYTE_AT (fx_off+0x2)=target BEGIN
+			READ_SHORT fx_off opcode
+			PATCH_IF opcode=177 BEGIN
+				READ_ASCII fx_off+0x14 resource
+				TO_UPPER resource
+				PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%resource%") BEGIN
+					is_177=1
+					opcode=$opcode_eff_arr("%resource%")
+					param1=$opcode_eff_arr("%resource%" "param1")
+					param2=$opcode_eff_arr("%resource%" "param2")
+					PATCH_IF opcode=primary_opcode BEGIN				
+						177_count+=1
+					END
+				END
+			END
+			PATCH_MATCH "%opcode%" WITH
+			"%primary_opcode%" BEGIN
+				match=include_primary
+				++payload_count
+			END
+			206 318 324 BEGIN
+				READ_ASCII (fx_off+0x14)imm_res
+				PATCH_IF "%imm_res%" STR_EQ "%parent_resource%" BEGIN
+					match=0
+				END ELSE BEGIN
+					persistent=(LONG_AT (fx_off+0xe))>6
+					match=persistent
+				END
+			END
+			328 BEGIN
+				READ_LONG (fx_off+0x8) splstate
+				PATCH_MATCH "%payload% %splstate%" WITH
+				"39 0" //hopelessness
+				BEGIN
+					persistent=(LONG_AT (fx_off+0xe))>6
+					match=persistent
+				END
+				DEFAULT
+					match=0
+					persistent=0
+				END
+			END
+			174 BEGIN
+				persistent=(LONG_AT (fx_off+0xe))>6
+				match=include_all_cosmetics
+			END
+			142 BEGIN 
+				PATCH_IF is_177 BEGIN
+					icon=param2
+				END ELSE BEGIN
+					READ_LONG fx_off+0x8 icon
+				END
+				match=VARIABLE_IS_SET $opcode_icons("%primary_opcode%" "%icon%")
+				persistent=(primary_opcode=700 && (LONG_AT (fx_off+0xe))>6 ) // only icons associated with ability drain get siphoned off (harmless to do so, since the primary opcode itself is treated as persistent so there is always a subspell)
+			END
+			139 BEGIN
+				PATCH_IF is_177 BEGIN
+					strref=param1
+				END ELSE BEGIN
+					READ_LONG fx_off+0x4 strref
+				END
+				match=VARIABLE_IS_SET $opcode_strrefs("%primary_opcode%" "%strref%")
+				persistent=(BYTE_AT (fx_off+0xc))=4 && (LONG_AT (fx_off+0xe))>6 
+			END
+			215 BEGIN
+				READ_ASCII fx_off+0x14 anim
+				TO_UPPER anim
+				match=VARIABLE_IS_SET $opcode_animations("%primary_opcode%" "%anim%") || include_all_cosmetics
+				persistent=(LONG_AT (fx_off+0xe))>6
+			END
+			141 BEGIN
+				READ_LONG fx_off+0x8 sparkle
+				match=VARIABLE_IS_SET $opcode_sparkles("%primary_opcode%" "%sparkle%") || include_all_cosmetics
+			END
+			327 BEGIN
+				persistent=(LONG_AT (fx_off+0xe))>6
+				match=include_all_cosmetics
+			END
+			7 8 9 50 51 52 60 61 BEGIN
+				READ_LONG fx_off+0x4 param1
+				match=VARIABLE_IS_SET $opcode_glows("%primary_opcode%" "%param1%") || include_all_cosmetics
+				persistent=(LONG_AT (fx_off+0xe))>6
+			END	
+			DEFAULT
+				PATCH_MATCH "%primary_opcode%" WITH
+				700 BEGIN // ability drain virtual
+					match=(opcode=6||opcode=10||opcode=15||opcode=19||opcode=44||opcode=49)
+					persistent=(LONG_AT (fx_off+0xe))>6
+					PATCH_IF match BEGIN
+						READ_BYTE fx_off+0x12 prob1
+						READ_BYTE fx_off+0x13 prob2
+						PATCH_IF !(prob1>=99 && prob2=0) BEGIN
+							payload_count+=1 // don't up payload count here unless we're playing probability games, we only want one payload logged even if there are multiple ability drains
+						END
+						PATCH_IF mode=1 BEGIN
+							// in this case we want it left in place but 700d
+							WRITE_SHORT fx_off 700
+							match=0
+						END
+					END ELSE BEGIN // second check - we will also allow 0 and 54 as secondaries
+						match=(opcode=0||opcode=54)
+					END
+				END
+				16 BEGIN // haste
+					match=(opcode=93)
+					persistent=(LONG_AT (fx_off+0xe))>6
+				END
+				24 BEGIN
+					match=(opcode=106)
+					persistent=(LONG_AT (fx_off+0xe))>6				
+				END
+				25 BEGIN // poison
+					match=(opcode=13)
+				END
+				39 BEGIN // sleep
+					PATCH_MATCH "%opcode%" WITH
+					235 BEGIN
+						match=1 // wing buffet
+						persistent=(LONG_AT (fx_off+0xe))>6
+					END
+					DEFAULT
+						match=0
+					END
+				END
+				40 BEGIN //slow
+					match=(opcode=0 || opcode=54 || opcode=240 ||opcode=158 )
+					persistent=(LONG_AT (fx_off+0xe))>6
+				END
+				55 BEGIN //slay
+					PATCH_IF opcode=12 BEGIN //FoD-style damage
+						READ_SHORT (fx_off+0xa) type
+						match=(type=64)
+					END ELSE
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII (fx_off+0x14) resource
+						match=("%resource%" STR_EQ "DESTSELF" || "%resource%" STR_EQ "FINGER")
+					END ELSE BEGIN
+						match=0
+					END
+				END
+				154 BEGIN //entanglement
+					match=(opcode=0 || opcode=126)
+				END
+				DEFAULT
+					match=0
+				END		
+			END
+		END ELSE BEGIN
+			match=0
+			persistent=0
+		END
+		// allow for persistence
+		match=match && (persistent || include_non_persistent || opcode=primary_opcode)
+		persistence_check = persistence_check || persistent
+		matched_anything=matched_anything || match
+		// execute
+		PATCH_IF match=mode BEGIN
+			WRITE_SHORT fx_off 999
+		END ELSE
+		PATCH_IF mode=2 BEGIN
+			PATCH_IF match && !found_match BEGIN
+				found_match=1
+			END ELSE
+			PATCH_IF !match && found_match BEGIN
+				value=0
+			END
+		END ELSE
+		PATCH_IF mode=3 BEGIN
+			PATCH_IF match && !found_match BEGIN
+				found_match=1
+				PATCH_IF VARIABLE_IS_SET $opcode_splstate_map("%primary_opcode%") BEGIN
+					INSERT_BYTES fx_off 0x30
+					WRITE_SHORT fx_off 324
+					WRITE_BYTE (fx_off+0x2) target
+					WRITE_LONG (fx_off+0x4) $opcode_splstate_map("%primary_opcode%")
+					WRITE_LONG (fx_off+0x8) 110
+					WRITE_BYTE (fx_off+0x12) 100
+					WRITE_ASCII (fx_off+0x14) "%current_resource%" 
+					WRITE_BYTE (fx_off+0xc) 0
+					WRITE_LONG (fx_off+0xe) 1
+					++ delta_here
+				END
+			END
+		END	
+	END
+END
+
+// for an effect with more than one copy of the payload opcode, check if the probabilities and/or saving throw data vary from copy to copy
+
+DEFINE_PATCH_FUNCTION audit_multiple_payload_effects
+	INT_VAR payload=0
+	RET probs saves
+BEGIN
+	probs=0
+	saves=0
+	GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+	PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+		PATCH_IF !(probs && saves) BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			found_first=0
+			probs_here=0
+			saves_here=0
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				PATCH_IF payload=700 BEGIN
+					READ_SHORT fx_off opcode
+					payload_match=(opcode=6||opcode=10||opcode=15||opcode=19||opcode=44||opcode=49)
+				END ELSE BEGIN
+					payload_match=((SHORT_AT fx_off)=payload)
+				END
+				PATCH_IF payload_match BEGIN
+					PATCH_IF !found_first BEGIN
+						found_first=1
+						READ_SHORT (fx_off+0x12) probability_data
+						READ_LONG (fx_off+0x24) save_data_1
+						READ_LONG (fx_off+0x28) save_data_2
+					END ELSE BEGIN
+						probs_here=probs_here || !(SHORT_AT (fx_off+0x12) = probability_data)
+						saves_here=saves_here || !(LONG_AT (fx_off+0x24) = save_data_1) || !(LONG_AT (fx_off+0x28) = save_data_2)
+					END
+				END		
+			END	
+			probs=probs || probs_here
+			saves=saves || saves_here
+		END
+	END
+	PATCH_IF telemetry BEGIN
+		PATCH_PRINT "audit on %SOURCE_FILE%: probs=%probs%, saves=%saves%"
+	END
+END
+
+
+
+<<<<<<<<.../stratagems-inline/dw_opcodes_persistent_subspells.2da
+2DA V1.0
+*				subspell
+>>>>>>>>
+
+
+<<<<<<<<.../stratagems-inline/blank
+>>>>>>>>

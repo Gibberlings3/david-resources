@@ -1,0 +1,3509 @@
+ACTION_DEFINE_ASSOCIATIVE_ARRAY icon_map BEGIN
+	6=>Poisoned
+	13=>Held
+	14=>Sleep
+	130=>Unconscious
+	126=>Nauseated
+	44=>Hopelessness
+	
+END
+
+ACTION_DEFINE_ASSOCIATIVE_ARRAY ignore_these_resources BEGIN
+	SPWI939.SPL=>"" //CHARM_HERO
+	SPWI996.SPL=>"" //CHARM_KORAX
+	SPIN785.SPL=>"" //PERM_CHARM
+	SPIN572.SPL=>"" //CUTSCENE_HASTE
+	SPIN584.SPL=>"" //GAIN_HASTE_TEMPORARY - unused?
+	RUNRUN.SPL=>""
+	SPIN672.SPL=>"" // QUICK_INVISIBLE
+	OHBJOKE1.SPL=>""
+	OHBJOKE2.SPL=>""
+	OHBJOKE3.SPL=>""
+	MAGICONF.ITM=>"" //unused
+	SPIN919.SPL=>"" // JAHEIRA_WEAKNESS
+	SPIN808.SPL=>"" // DRAIN_PARTY
+	SPIN817.SPL=>"" //C6BODHI_WEAKNESS
+	CH3DRAIN.SPL=>"" // unused
+	SPIDWR.ITM=>"" //unused
+	SPIN947.SPL=>"" //CUTSCENE_FOG
+	CH3WEAK.SPL=>"" // I-think-unused script effects
+	CH3AWAY.SPL=>""
+	CH3WEAK.SPL=>""
+	CH3FLASH.SPL=>""
+	CH3SLAY.SPL=>""
+	SPIN628.SPL=>"" //SLOW_FREEZE
+	SPIN818.SPL=>"" //C6VAMPIRE_WEAKNESS
+END
+
+DEFINE_ACTION_FUNCTION find_opcode_use INT_VAR opcode=0 require_icon="-1" BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			found=0
+			is_short=0
+			found_icon= (require_icon<0)
+			SPRINT savetype ""
+			SPRINT icon_string ""
+			SPRINT string_string ""
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF !found BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode_here
+						PATCH_IF opcode_here=opcode BEGIN
+							found=1
+							PATCH_IF "%SOURCE_EXT%" STR_EQ spl BEGIN
+								READ_STRREF 0x8 name
+								INNER_PATCH_SAVE resref "%SOURCE_RES%" BEGIN
+									REPLACE_TEXTUALLY sppr 1
+									REPLACE_TEXTUALLY spwi 2
+									REPLACE_TEXTUALLY spin 3
+									REPLACE_TEXTUALLY spcl 4
+								END
+								PATCH_IF IS_AN_INT resref BEGIN
+									LOOKUP_IDS_SYMBOL_OF_INT idsname spell resref
+									SPRINT name "%name%; %idsname%"
+								END
+							END ELSE BEGIN
+								READ_STRREF 0xc name
+							END
+							
+							is_short=((LONG_AT (fx_off+0xe))<6)
+							READ_LONG fx_off+0x24 savetype
+							PATCH_IF savetype BAND 0b00000100 BEGIN
+								SPRINT savetype poison
+							END ELSE
+							PATCH_IF savetype BAND 0b00000001 BEGIN
+								SPRINT savetype spell
+							END ELSE
+							PATCH_IF savetype BAND 0b00001000 BEGIN
+								SPRINT savetype wand
+							END ELSE
+							PATCH_IF savetype=0 BEGIN
+								SPRINT savetype none
+							END ELSE BEGIN
+								SPRINT savetype unknown
+							END
+							READ_LONG fx_off+0x2c icon
+							PATCH_IF icon>0 BEGIN
+								PATCH_IF VARIABLE_IS_SET $icon_map("%icon%") BEGIN
+									SPRINT icon_name $icon_map("%icon%")
+								END ELSE BEGIN
+									SPRINT icon_name "Unknown icon %icon%"
+								END
+								SPRINT icon_string "%icon_string%%icon_name% "						
+							END
+						END ELSE 
+						PATCH_IF opcode_here=142 BEGIN
+							READ_LONG fx_off+0x8 icon
+							found_icon=found_icon || (icon=require_icon)
+							PATCH_IF VARIABLE_IS_SET $icon_map("%icon%") BEGIN
+								SPRINT icon_name $icon_map("%icon%")
+							END ELSE BEGIN
+								SPRINT icon_name "Unknown icon %icon%"
+							END
+							SPRINT icon_string "%icon_string%%icon_name% "
+						END ELSE
+						PATCH_IF opcode_here=139 BEGIN
+							READ_STRREF fx_off+0x4 string
+							SPRINT string_string "%string_string%%string% "
+						END
+					END
+				END
+			END
+			PATCH_IF found && ( !found_icon || (require_icon<0) )BEGIN	
+				PATCH_IF is_short BEGIN
+					SPRINT $short_list("%SOURCE_FILE% (%icon_string%) (%string_string%)") "%name%"
+				END ELSE BEGIN
+					SPRINT $"%savetype%_list"("%SOURCE_FILE% (%icon_string%) (%string_string%)") "%name%"			
+				END
+			END
+		END
+	ACTION_FOR_EACH list IN short_list poison_list spell_list wand_list none_list unknown_list BEGIN
+		PRINT "%list%"
+		ACTION_PHP_EACH "%list%" AS k=>v BEGIN
+			PRINT "%k% [%v%]"
+		END
+	END
+END
+
+DEFINE_ACTION_FUNCTION research_opcode_cre_immunity INT_VAR opcode=0 ignore_if_no_scripts=1 ignore_if_boss=1 exclude_undead=0 STR_VAR exception_type="" exception="" BEGIN
+
+	ACTION_CLEAR_ARRAY exception_array
+	ACTION_CLEAR_ARRAY instance_array
+	
+	// define types
+	ACTION_CLEAR_ARRAY type_array
+	ACTION_DEFINE_ASSOCIATIVE_ARRAY type_array BEGIN
+		animate=>0x28
+		class=>0x273
+		race=>0x272
+		general=>0x271
+	END
+	
+	//define unused or scripting-only creatures
+	ACTION_CLEAR_ARRAY ignore_array
+	ACTION_DEFINE_ASSOCIATIVE_ARRAY ignore_array BEGIN
+		UHOSTILE=>""
+		SENDARK=>""
+		SHADELD=>""
+		CEDELICH=>""
+		DPMON01=>""
+		DPMON02=>""
+		DPMON03=>""
+		WRAITHSU=>""
+		DRBOD=>""
+		DVAMPFL=>""
+		DRSHSP01=>""
+		THRAXI=>""
+		SAHBEH02=>""
+		SAHBEH03=>""
+		SAHBEH04=>""
+		M05SPIR1=>""
+		M05SPRI2=>""
+		OBSMOD01=>""
+	END
+
+	// find all items that give immunity (and all that give min-hp)
+	
+	COPY_EXISTING_REGEXP - ".*\.itm" nowhere
+		TO_UPPER SOURCE_RES
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+			GET_OFFSET_ARRAY fx_arr ITM_V10_GEN_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				PATCH_IF SHORT_AT fx_off=101 && LONG_AT (fx_off + 0x8)=opcode BEGIN
+					SPRINT $opcode_immune("%SOURCE_RES%") ""
+				END ELSE
+				PATCH_IF SHORT_AT fx_off=208 BEGIN
+					SPRINT $min_hp("%SOURCE_RES%") ""
+				END
+			END
+		END
+		
+	// go through creatures
+	
+	COPY_EXISTING_REGEXP - ".*\.cre" nowhere
+		TO_UPPER SOURCE_RES
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_array("%SOURCE_RES%") && (!exclude_undead || !(BYTE_AT 0x271=4)) BEGIN
+			opcode_immune=0
+			minhp=0
+			// check protective items
+			GET_OFFSET_ARRAY itm_arr CRE_V10_ITEMS
+			PHP_EACH itm_arr AS itm_ind=>itm_off BEGIN
+				READ_ASCII itm_off itm_res
+				TO_UPPER itm_res
+				opcode_immune=opcode_immune || VARIABLE_IS_SET $opcode_immune("%itm_res%") 
+				minhp=minhp || VARIABLE_IS_SET $min_hp("%itm_res%") 
+			END
+			// check on-creature effects directly
+			READ_BYTE 0x33 effect_type
+			PATCH_IF effect_type=0 BEGIN
+				GET_OFFSET_ARRAY fx_arr 0x2c4 4 0x2c8 4 0 0 0x30		
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY fx_arr CRE_V10_EFFECTS
+			END
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				PATCH_IF effect_type=0 BEGIN
+					opcode_immune=opcode_immune || (SHORT_AT fx_off)=101 && (LONG_AT (fx_off+0x8))=opcode
+					minhp=minhp ||  (SHORT_AT fx_off)=208				
+				END ELSE BEGIN
+					opcode_immune=opcode_immune || ( (LONG_AT (fx_off+0x8)=101) && LONG_AT (fx_off+0x18)=opcode)
+					minhp=minhp ||  LONG_AT (fx_off+0x8)=208
+				END
+			END
+			// check to see if it has no scripts
+			PATCH_IF ignore_if_no_scripts BEGIN
+				no_scripts=1
+				FOR (offset=0x248;offset<=0x268;offset+=8) BEGIN
+					READ_ASCII offset script
+					PATCH_IF "%script%" STR_CMP "" && "%script%" STR_CMP "None" BEGIN
+						no_scripts=0
+					END
+				END
+			END ELSE BEGIN
+				no_scripts=0
+			END
+			minhp=ignore_if_boss?minhp:0
+			PATCH_IF !minhp && !no_scripts BEGIN
+				PHP_EACH type_array AS type=>offset BEGIN
+					PATCH_IF "%type%" STR_EQ "animate" BEGIN
+						READ_LONG offset id_int
+					END ELSE BEGIN
+						READ_BYTE offset id_int
+					END
+					LOOKUP_IDS_SYMBOL_OF_INT name "%type%" id_int
+					PATCH_IF opcode_immune BEGIN
+						PATCH_IF VARIABLE_IS_SET $"%type%_is_immune"("%name%") BEGIN
+							SET ++$"%type%_is_immune"("%name%")
+						END ELSE BEGIN
+							SET $"%type%_is_immune"("%name%")=1
+						END
+					END ELSE BEGIN
+						PATCH_IF VARIABLE_IS_SET $"%type%_is_not_immune"("%name%") BEGIN
+							SET ++$"%type%_is_not_immune"("%name%")
+						END ELSE BEGIN
+							SET $"%type%_is_not_immune"("%name%")=1
+						END
+					END
+					PATCH_IF "%exception_type%" STR_EQ "%type%" && "%exception%" STR_EQ "%name%" BEGIN
+						PATCH_IF opcode_immune BEGIN
+							SPRINT $instance_array("%SOURCE_RES%") ""
+						END ELSE BEGIN
+							SPRINT $exception_array("%SOURCE_RES%") ""
+						END
+					END
+				END
+
+			END
+		END
+		
+	ACTION_FOR_EACH type IN animate class race general BEGIN
+		PRINT "%type%"
+		ACTION_PHP_EACH "%type%_is_immune" AS k=>v BEGIN
+			ACTION_IF VARIABLE_IS_SET $"%type%_is_not_immune"("%k%") BEGIN
+				OUTER_SET v2=$"%type%_is_not_immune"("%k%")
+				OUTER_SET total=v+v2
+				PRINT "%k% (%v%/%total%)"
+			END ELSE BEGIN
+				PRINT "%k%"
+			END
+		END
+	END
+	
+	ACTION_IF "%exception%" STR_CMP "" BEGIN
+		PRINT "Instances for %exception_type%=%exception%" 
+		ACTION_PHP_EACH instance_array AS k=>v BEGIN
+			PRINT "%k%"
+		END	
+		PRINT "Exceptions for %exception_type%=%exception%"
+		ACTION_PHP_EACH exception_array AS k=>v BEGIN
+			PRINT "%k%"
+		END	
+	END
+END
+
+DEFINE_ACTION_FUNCTION research_opcode_eqitm_immunity INT_VAR opcode=0 BEGIN
+
+	
+	COPY_EXISTING_REGEXP - ".*\.itm" nowhere
+		TO_UPPER SOURCE_RES
+		PATCH_IF BUFFER_LENGTH>0 && (BYTE_AT 0x18) BAND BIT2 BEGIN
+			GET_OFFSET_ARRAY fx_arr ITM_V10_GEN_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				PATCH_IF SHORT_AT fx_off=101 && LONG_AT (fx_off + 0x8)=opcode BEGIN
+					SPRINT $opcode_immune("%SOURCE_RES%") ""
+				END 
+			END
+		END
+
+	ACTION_PHP_EACH opcode_immune AS k=>v BEGIN
+		PRINT "%k%"
+	END
+
+END
+
+
+DEFINE_ACTION_FUNCTION research_opcode_itm_spl_immunity INT_VAR opcode=0 BEGIN
+
+	
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		found=0
+		PATCH_IF BUFFER_LENGTH>0 && (("%SOURCE_EXT%" STR_EQ spl) || ((BYTE_AT 0x18) BAND BIT2)) BEGIN
+			TO_UPPER SOURCE_RES
+			PATCH_IF "%SOURCE_EXT%" STR_EQ spl BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF !found BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						PATCH_IF !found && SHORT_AT fx_off=101 && SHORT_AT (fx_off+0x8)=opcode BEGIN
+							found=1
+							PATCH_IF "%SOURCE_EXT%" STR_EQ spl BEGIN
+								READ_STRREF 0x8 name
+								INNER_PATCH_SAVE resref "%SOURCE_RES%" BEGIN
+									REPLACE_TEXTUALLY sppr 1
+									REPLACE_TEXTUALLY spwi 2
+									REPLACE_TEXTUALLY spin 3
+									REPLACE_TEXTUALLY spcl 4
+								END
+								PATCH_IF IS_AN_INT resref BEGIN
+									LOOKUP_IDS_SYMBOL_OF_INT idsname spell resref
+									SPRINT name "%name%; %idsname%"
+								END
+							END ELSE BEGIN
+								READ_STRREF 0xc name
+							END
+							READ_BYTE fx_off+0xc duration
+							PATCH_IF duration=1 || duration=9 BEGIN
+								SPRINT $permanent("%SOURCE_FILE%") "%name%"
+							END ELSE BEGIN
+								SPRINT $temp("%SOURCE_FILE%") "%name%"
+							END
+						END
+					END
+				END
+			END
+			GET_OFFSET_ARRAY fx_arr ITM_V10_GEN_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				PATCH_IF SHORT_AT fx_off=101 && LONG_AT (fx_off + 0x8)=opcode BEGIN
+					SPRINT $opcode_immune("%SOURCE_RES%") ""
+				END 
+			END
+		END
+
+	ACTION_FOR_EACH list IN permanent temp BEGIN
+		PRINT "%list%"
+		ACTION_PHP_EACH "%list%" AS k=>v BEGIN
+			PRINT "%k% (%v%)"
+		END
+	END
+
+END
+
+DEFINE_ACTION_FUNCTION research_knockdown BEGIN
+
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			sleep=0
+			has_buffet=0
+			SPRINT savetype ""
+			SPRINT icon_string ""
+			SPRINT string_string ""
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF !(sleep && has_buffet) BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode_here
+						PATCH_IF opcode_here=39 BEGIN
+							sleep=1
+							READ_LONG fx_off+0xe duration_sleep
+						END ELSE 
+						PATCH_IF opcode_here=235 BEGIN
+							has_buffet=1
+							READ_LONG fx_off+0xe duration_buffet
+						END
+					END
+				END
+			END
+			PATCH_IF has_buffet && !sleep BEGIN
+				SPRINT $pure_buffet("%SOURCE_FILE%") "(%duration_buffet%)"
+			END ELSE
+			PATCH_IF has_buffet && sleep BEGIN
+				SPRINT $knockback("%SOURCE_FILE%") "(%duration_buffet%;%duration_sleep%)"
+			END ELSE
+			PATCH_IF !has_buffet && sleep && duration_sleep<6 BEGIN
+				SPRINT $knockdown("%SOURCE_FILE%") "(%duration_sleep%)"			
+			END
+		END
+	ACTION_FOR_EACH list IN pure_buffet knockback knockdown BEGIN
+		PRINT "%list%"
+		ACTION_PHP_EACH "%list%" AS k=>v BEGIN
+			PRINT "%k% [%v%]"
+		END
+	END
+END
+
+DEFINE_ACTION_FUNCTION research_icon INT_VAR icon=0 BEGIN
+
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			found=0
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF !found BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						found=found || (SHORT_AT fx_off=142 && LONG_AT (0x8+fx_off)=icon)
+					END
+				END
+			END
+		END
+		PATCH_IF found BEGIN
+			PATCH_PRINT "%SOURCE_FILE%"
+		END
+END
+
+DEFINE_ACTION_FUNCTION general_research_on_multiple_effects BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		PATCH_MATCH "%SOURCE_FILE%" WITH
+			"cdhgtrl.spl"	// troll regeneration
+			"cdtorgal.spl"
+			"cdtrlblz.spl"
+			"trollreg.spl"
+			"sppr715.spl"	// earthquake
+			"spogre01.spl"
+			"spin776.spl" // cutscene effect
+			"spwi413a.spl" // otiluke payload
+		BEGIN END
+		DEFAULT
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				primary_opcode="-1"
+				cosmetic=0
+				damage=0
+				wingbuffet=0
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END ELSE BEGIN
+							PATCH_PRINT "%SOURCE_FILE% has nonexistent effect file %eff%"
+						END
+					END
+					PATCH_MATCH opcode WITH
+					5 16 20 24 25 38 39 40 45 74 76 78 80 94 109 128 175 216 BEGIN
+						PATCH_IF LONG_AT (0xe+fx_off)>=6 BEGIN
+							PATCH_IF primary_opcode<0 BEGIN
+								primary_opcode=opcode
+							END ELSE BEGIN
+								PATCH_IF !(primary_opcode=opcode) BEGIN
+									SPRINT $multiple("%SOURCE_FILE%") ""
+									primary_opcode=999
+								END
+							END
+						END
+					END
+					7 8 9 50 52 61 66 139 141 142 165 174 206 215 233 240 282 287 318 321 324 328 BEGIN
+						cosmetic=1
+					// cosmetic
+					END
+					235 BEGIN
+						wingbuffet=1
+					END
+					93 BEGIN
+						// fatigue bonus - should generally be left alone
+					END
+					12 BEGIN
+						PATCH_IF primary_opcode>=0 BEGIN
+							SPRINT $damage("%SOURCE_FILE%") ""
+						END
+					END
+					54 BEGIN // treat THAC0 modifier as secondary in a slow effect
+						PATCH_IF !primary_opcode=40 && primary_opcode>=0 && !(BYTE_AT (fx_off+2)=1) BEGIN
+							SPRINT $complex("%SOURCE_FILE%") ""					
+						END
+					END
+					0 BEGIN // treat AC modifier as secondary in a slow or fear effect
+						PATCH_IF !primary_opcode=40 && !primary_opcode=24 && primary_opcode>=0 && !(BYTE_AT (fx_off+2)=1) BEGIN
+							SPRINT $complex("%SOURCE_FILE%") ""					
+						END
+					END		
+					73 278 BEGIN // treat attack and damage bonuses as secondary in a fear effect
+						PATCH_IF !primary_opcode=24 && primary_opcode>=0 && !(BYTE_AT (fx_off+2)=1) BEGIN
+							SPRINT $complex("%SOURCE_FILE%") ""					
+						END
+					END					
+					DEFAULT
+						PATCH_IF primary_opcode>=0 && !(BYTE_AT (fx_off+2)=1) BEGIN
+							SPRINT $complex("%SOURCE_FILE%") ""
+						END
+					END
+				END
+				PATCH_IF !(primary_opcode<0 || primary_opcode=999) && cosmetic BEGIN
+					SPRINT $regular("%SOURCE_FILE%") ""
+				END
+				PATCH_IF wingbuffet && !primary_opcode=39 BEGIN
+					SPRINT $buffet("%SOURCE_FILE%") ""
+				END
+			END
+		END
+		
+	ACTION_FOR_EACH list IN damage multiple complex regular buffet BEGIN
+		PRINT "%list%"
+		OUTER_SET count=0
+		ACTION_PHP_EACH "%list%" AS k=>v BEGIN
+			ACTION_IF "%list%" STR_CMP regular BEGIN
+				PRINT "%k%"
+			END
+			OUTER_SET ++count
+		END
+		PRINT "Total %list%=%count%"
+	END
+
+
+
+
+
+END
+
+DEFINE_ACTION_FUNCTION explore_secondary_paradigm BEGIN
+
+
+ACTION_DEFINE_ASSOCIATIVE_ARRAY opcode_secondaries BEGIN
+	// slow
+	40,0=>""
+	40,54=>""
+	//haste
+	16,93=>""
+	//sleep
+	39,235=>""
+	39,273=>""
+	//poison
+	25,13=>"" // picking up lethal ooze acidooz3
+	//invisibility
+	
+END
+
+ACTION_FOR_EACH opcode IN 
+7 8 9 50 52 61 66 139 141 142 165 174 206 215 240 282
+BEGIN
+	OUTER_SPRINT $cosmetic("%opcode%") ""
+END
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		PATCH_MATCH "%SOURCE_FILE%" WITH
+			//exceptions go here
+			"cdhgtrl.spl"	// troll regeneration
+			"cdtorgal.spl"
+			"cdtrlblz.spl"
+			"trollreg.spl"
+			"sppr715.spl"	// earthquake
+			"spogre01.spl"
+			"spin776.spl" // cutscene effect
+			"spwi413a.spl" // otiluke payload
+			"spcl415a.spl"
+		BEGIN END
+		DEFAULT
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+				// first, find primary payload(s)
+				primary="-1"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_MATCH "%opcode%" WITH
+					5 16 20 24 25 38 39 40 45 74 76 78 80 94 109 128 175 216 BEGIN
+						primary=primary<0?opcode:(primary=opcode?primary:999)
+						READ_ASCII fx_off+0x24 savedata (8)
+						READ_SHORT fx_off+0x12 probdata
+						READ_SHORT fx_off+0x1e duration
+					END
+					DEFAULT					
+					END
+				END
+				PATCH_MATCH "%primary%" WITH
+				"-1" BEGIN
+					// no persistent payload, disregard
+				END
+				999 BEGIN
+					// multiple payload
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode_here
+						READ_SHORT fx_off+0xe duration_here
+						PATCH_IF duration_here>0 BEGIN
+							PATCH_MATCH "%opcode%" WITH
+							5 16 20 24 25 38 39 40 45 74 76 78 80 94 109 128 175 216 BEGIN
+							END
+							DEFAULT
+								SPRINT $multiple_complex("%SOURCE_FILE%") ""
+							END
+						END
+					END
+					PATCH_IF !VARIABLE_IS_SET $multiple_complex("%SOURCE_FILE%") BEGIN
+						SPRINT $multiple_simple("%SOURCE_FILE%") ""
+					END
+				END
+				DEFAULT
+					// single primary payload, check it out
+					// first look for an icon other than the primary icon
+					extra_icon=0
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode
+						PATCH_IF opcode=142 BEGIN
+							READ_LONG fx_off+0x8 icon
+							PATCH_MATCH "%icon%" WITH
+							3 47 2 BEGIN // confusion
+								extra_icon_here=!(primary=128)
+							END
+							5 BEGIN //intoxicated
+								extra_icon_here=!(primary=94)
+							END
+							13 BEGIN // held
+								extra_icon_here=!(primary=109)
+							END
+							34 BEGIN // silence
+								extra_icon_here=!(primary=38)
+							END
+							36 BEGIN // panic
+								extra_icon_here=!(primary=24)
+							END
+							48 BEGIN //feeblemind
+								extra_icon_here=!(primary=76)
+							END
+							112 BEGIN //deafness
+								extra_icon_here=!(primary=80)
+							END
+							DEFAULT
+								extra_icon_here=1
+							END					
+							extra_icon = extra_icon || extra_icon_here
+						
+						END
+					END
+					PATCH_IF extra_icon BEGIN
+						SPRINT $extra_icon("%SOURCE_FILE%") "%icon%"
+					END ELSE BEGIN
+						// now look for persistent effects that have a mismatch of duration, probability, or saving throw, and for non-cosmoetic effects
+						duration_mismatch=0
+						PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+							READ_SHORT fx_off+0x1e duration_here
+							PATCH_IF duration_here>0 BEGIN
+								READ_ASCII fx_off+0x24 savedata_here (8)
+								READ_SHORT fx_off+0x12 probdata_here
+								duration_mismatch=duration_mismatch || !(probdata_here=probdata) || !(duration_here=duration) || "%savedata_here%" STR_CMP "%savedata%"					
+							END							
+						END
+						PATCH_IF duration_mismatch BEGIN
+							SPRINT $duration_mismatch("%SOURCE_FILE%") ""
+						END ELSE BEGIN
+							READ_SHORT fx_off opcode
+							PATCH_MATCH "%opcode%" WITH
+							7 8 9 50 52 61 66 139 141 142 165 174 206 215 233 240 282 287 318 321 324 328 BEGIN
+							END
+							"%primary%" BEGIN END
+							12 BEGIN
+								SPRINT $adds_damage("%SOURCE_FILE%") ""
+							END
+							DEFAULT
+								PATCH_IF !VARIABLE_IS_SET $opcode_secondaries("%primary%" "%opcode%") BEGIN
+									SPRINT $extra_payload("%SOURCE_FILE%") ""
+								END
+							END
+							
+						END
+						
+					END
+				
+				END
+			
+			
+			END
+		END
+
+	ACTION_FOR_EACH list IN multiple_complex multiple_simple extra_icon duration_mismatch extra_payload adds_damage BEGIN
+		PRINT "%list%"
+		OUTER_SET count=0
+		ACTION_PHP_EACH "%list%" AS k=>v BEGIN
+			PRINT "%k% %v%"
+			OUTER_SET ++ count
+		END
+		PRINT "count of %list%: %count%"
+	
+	END
+
+
+
+
+END
+
+
+
+DEFINE_ACTION_FUNCTION research_mr BEGIN
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		found_lower=0
+		found_icon=0
+		PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+		END ELSE BEGIN
+			GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		END
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode
+				PATCH_IF opcode=166 BEGIN
+					READ_LONG fx_off+ 0x4 val
+					PATCH_IF val<0 BEGIN
+						found_lower=1
+					END
+				END ELSE
+				PATCH_IF opcode=142 BEGIN
+					READ_LONG fx_off+0x8 icon
+					PATCH_IF icon=106 BEGIN
+						found_icon=1
+					END
+				END
+			END	
+		END
+		PATCH_IF (found_lower && !found_icon) BEGIN
+			PATCH_PRINT "%SOURCE_FILE%"
+		END
+END
+
+DEFINE_ACTION_FUNCTION research_iwd_glows BEGIN
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		PATCH_MATCH "%SOURCE_FILE%" WITH
+		THRYM.ITM 
+		VAMP.ITM
+		VAMP1.ITM
+		SPWI220.SPL
+		SPWI815.SPL
+		SPIN148.SPL
+		SPIN184.SPL
+		SPPR722.SPL
+		SPWI054.SPL
+		SLAYLIVE.ITM
+		SPIN200.SPL
+		SPIN802.SPL
+		VORPAL.SPL
+		SPPR599.SPL
+		BEGIN END
+		DEFAULT
+			found_lower=0
+			found_icon=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+				anim_count=0
+				glow_code=0
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII fx_off+ 0x14 anim
+						TO_UPPER anim
+						anim_count+=1
+					END ELSE
+					PATCH_IF opcode=61 BEGIN
+						READ_LONG fx_off+0x4 glow_code
+					END
+				END	
+				PATCH_IF anim_count=1 BEGIN
+					SET $anim_list("%anim%")=1
+					PATCH_IF VARIABLE_IS_SET $anim_glow_maps("%anim%" "%glow_code%") BEGIN
+						SET $anim_glow_maps("%anim%" "%glow_code%")+=1
+					END ELSE BEGIN
+						SET $anim_glow_maps("%anim%" "%glow_code%")=1
+						SPRINT $anim_glow_ex("%anim%" "%glow_code%") "%SOURCE_FILE%"
+					END
+					PATCH_IF VARIABLE_IS_SET $anim_glow_first("%anim%") && !(glow_code=$anim_glow_first("%anim%")) BEGIN
+						SPRINT $anim_codes_mismatch("%anim%") ""
+					END ELSE BEGIN
+						SET $anim_glow_first("%anim%")=glow_code
+					END
+				END
+			END
+		END
+	ACTION_SORT_ARRAY_INDICES anim_list LEXICOGRAPHICALLY
+	ACTION_SORT_ARRAY_INDICES anim_codes_mismatch LEXICOGRAPHICALLY
+	ACTION_PHP_EACH anim_codes_mismatch AS anim=>discard BEGIN
+		ACTION_PHP_EACH anim_glow_maps AS k=>v BEGIN
+			ACTION_IF "%k_0%" STR_EQ "%anim%" BEGIN
+				OUTER_SPRINT ex $anim_glow_ex("%anim%" "%k_1%")
+				PRINT "%k_0%,%k_1%: %v% (ex. %ex%)"
+			END
+		END
+	END
+END
+
+
+
+DEFINE_ACTION_FUNCTION research_ability_drain BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		found_lower=0
+		found_icon=0
+		found_right_icon=0
+		PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+		END ELSE BEGIN
+			GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		END
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode
+				PATCH_MATCH "%opcode%" WITH
+				44 10 15 6 19 49 BEGIN
+					READ_LONG fx_off+ 0x4 val
+					READ_BYTE fx_off+0xc timing
+					PATCH_IF val<0 && !(timing=1 || timing=4 || timing=7) BEGIN
+						found_lower=1
+					END
+				END
+				142 BEGIN
+					READ_LONG fx_off+0x8 icon
+					PATCH_MATCH "%icon%" WITH
+					35 86 91 //cursed, INT drain by MF, ability drain
+					BEGIN
+						found_right_icon=1
+						found_icon=1
+					END
+					DEFAULT
+						found_icon=1
+					END
+				END
+				DEFAULT
+				END
+			END	
+		END
+		PATCH_IF (found_lower && !found_icon) BEGIN
+			PATCH_PRINT "%SOURCE_FILE% (no icon)"
+		END
+		PATCH_IF (found_lower && found_icon && !found_right_icon) BEGIN
+			PATCH_PRINT "%SOURCE_FILE%"
+		END
+END
+
+DEFINE_ACTION_FUNCTION research_ability_drain BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		found_lower=0
+		found_icon=0
+		found_right_icon=0
+		PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+		END ELSE BEGIN
+			GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		END
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode
+				PATCH_MATCH "%opcode%" WITH
+				44 10 15 6 19 49 BEGIN
+					READ_LONG fx_off+ 0x4 val
+					READ_BYTE fx_off+0xc timing
+					PATCH_IF val<0 && !(timing=1 || timing=4 || timing=7) BEGIN
+						found_lower=1
+					END
+				END
+				142 BEGIN
+					READ_LONG fx_off+0x8 icon
+					PATCH_MATCH "%icon%" WITH
+					35 86 91 //cursed, INT drain by MF, ability drain
+					BEGIN
+						found_right_icon=1
+						found_icon=1
+					END
+					DEFAULT
+						found_icon=1
+					END
+				END
+				DEFAULT
+				END
+			END	
+		END
+		PATCH_IF (found_lower && !found_icon) BEGIN
+			PATCH_PRINT "%SOURCE_FILE% (no icon)"
+		END
+		PATCH_IF (found_lower && found_icon && !found_right_icon) BEGIN
+			PATCH_PRINT "%SOURCE_FILE%"
+		END
+END
+
+
+
+
+DEFINE_ACTION_FUNCTION research_ability_drain_strings BEGIN
+
+	ACTION_DEFINE_ASSOCIATIVE_ARRAY string_arr BEGIN
+		44=>14042
+		15=>14024
+		10=>14029
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		found_lower=0
+		found_icon=0
+		found_right_icon=0
+		PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+		END ELSE BEGIN
+			GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		END
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode
+				PATCH_MATCH "%opcode%" WITH
+				44 10 15 6 19 49 BEGIN
+					READ_LONG fx_off+ 0x4 val
+					READ_BYTE fx_off+0xc timing
+					PATCH_IF val<0 && !(timing=1 || timing=4 || timing=7) BEGIN
+						found_lower=1
+					END
+				END
+				139 BEGIN
+					READ_LONG fx_off+0x4 string
+					PATCH_MATCH "%string%" WITH
+					14042 14024 14029 32089
+					BEGIN
+						found_right_icon=1
+						found_icon=1
+					END
+					DEFAULT
+						found_icon=1
+					END
+				END
+				DEFAULT
+				END
+			END	
+		END
+		PATCH_IF (found_lower && !found_icon) BEGIN
+		//	PATCH_PRINT "%SOURCE_FILE% (no string)"
+		END ELSE
+		PATCH_IF (found_lower && !found_right_icon) BEGIN
+		//	PATCH_PRINT "%SOURCE_FILE% (%string%)"
+		END ELSE
+		PATCH_IF found_lower BEGIN
+			PATCH_PRINT "%SOURCE_FILE% - RIGHT"
+		END
+END
+
+DEFINE_ACTION_FUNCTION research_icon_assignment 
+	INT_VAR opcode=0
+			icon1="-1"
+			icon2="-1"
+			icon3="-1"
+			icon4="-1"
+			icon5="-1"
+			icon6="-1"
+			any_icon=0
+			display_match=0
+			display_mismatch=0
+	STR_VAR direction=either
+BEGIN
+	OUTER_SET match=0
+	OUTER_SET total=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		found_opcode=0
+		found_icon=0
+		PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+		END ELSE BEGIN
+			GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		END
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode_here
+				PATCH_MATCH "%opcode_here%" WITH
+				"%opcode%" BEGIN
+					icon_here=999
+					READ_LONG fx_off+ 0x4 val
+					READ_LONG fx_off+0x8 param2
+					READ_BYTE fx_off+0xc timing
+					PATCH_IF !(timing=1 || timing=4 || timing=7) BEGIN
+						PATCH_MATCH "%direction%" WITH
+						increase BEGIN
+							found_opcode=(param2=0 && (val>0)) || (param2=1 && (val>17) )
+						END
+						decrease BEGIN
+							found_opcode=(param2=0 && (val<0)) || (param2=1 && (val<4) )
+						END
+						either BEGIN
+							found_opcode=1
+						END
+						DEFAULT
+							PATCH_FAIL "illegal direction %direction%"
+						END
+					END
+				END
+				142 BEGIN
+					icon_here=LONG_AT (fx_off+0x8)
+				END
+				40 BEGIN
+					icon_here=40
+				END
+				
+				DEFAULT 
+					icon_here=999
+				END
+				found_icon=found_icon || any_icon || icon_here=icon1 || icon_here=icon2 || icon_here=icon3 ||icon_here=icon4||icon_here=icon5||icon_here=icon6
+			END	
+		END
+		PATCH_IF found_opcode BEGIN
+			++total
+			PATCH_IF found_icon BEGIN
+				++match
+				PATCH_IF display_match BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END ELSE BEGIN
+				PATCH_IF display_mismatch BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END
+		END
+		PRINT "%match%/%total%"
+
+
+
+
+END
+
+DEFINE_ACTION_FUNCTION research_string_assignment
+	INT_VAR opcode=0
+			string1="-1"
+			string2="-1"
+			string3="-1"
+			string4="-1"
+			string5="-1"
+			string6="-1"
+			any_string=0
+			display_match=0
+			display_mismatch=0
+			BEGIN
+	OUTER_SET match=0
+	OUTER_SET total=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		found_opcode=0
+		found_string=0
+		PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+		END ELSE BEGIN
+			GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		END
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode_here
+				PATCH_MATCH "%opcode_here%" WITH
+				"%opcode%" BEGIN
+					string_here=999999
+					READ_LONG fx_off+ 0x4 val
+					READ_LONG fx_off+0x8 param2
+					READ_BYTE fx_off+0xc timing
+					PATCH_IF !(timing=1 || timing=4 || timing=7) BEGIN
+						found_opcode=1
+					END
+				END
+				139 BEGIN
+					string_here=LONG_AT (fx_off+0x4)
+				END				
+				DEFAULT 
+					string_here=9999999
+				END
+				found_string=found_string || any_string || string_here=string1 || string_here=string2 || string_here=string3 ||string_here=string4||string_here=string5||string_here=string6
+			END	
+		END
+		PATCH_IF found_opcode BEGIN
+			++total
+			PATCH_IF found_string BEGIN
+				++match
+				PATCH_IF display_match BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END ELSE BEGIN
+				PATCH_IF display_mismatch BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END
+		END
+		PRINT "%match%/%total%"
+
+
+
+
+END
+
+DEFINE_ACTION_FUNCTION research_secondary
+	INT_VAR primary=0
+			secondary=0
+			display_match=0
+			display_mismatch=0
+BEGIN
+	OUTER_SET total=0
+	OUTER_SET match=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		found_primary=0
+		found_secondary=0
+		PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+		END ELSE BEGIN
+			GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		END
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode
+				PATCH_IF opcode=primary BEGIN
+					found_primary=1
+				END ELSE
+				PATCH_IF opcode=secondary BEGIN
+					found_secondary=1
+				END
+			END			
+		END
+		PATCH_IF found_primary BEGIN
+			++total
+			PATCH_IF found_secondary BEGIN
+				++match
+				PATCH_IF display_match BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END ELSE BEGIN
+				PATCH_IF display_mismatch BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END
+		END
+	PRINT "%match%/%total%"
+		
+
+
+
+END
+
+DEFINE_ACTION_FUNCTION research_slow INT_VAR display_match=0 display_mismatch=0 check_icon=0 check_string=0 BEGIN
+	OUTER_SET total=0
+	OUTER_SET match=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+		found_primary=0
+		found_string=0
+		found_icon=0
+		found_secondary=0
+		PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+		END ELSE BEGIN
+			GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+		END
+		PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+			GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+			PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+				READ_SHORT fx_off opcode
+				PATCH_IF opcode=40 BEGIN
+					found_primary=1
+				END ELSE
+				PATCH_IF opcode=0 BEGIN
+					found_secondary=1
+				END ELSE
+				PATCH_IF opcode=139 BEGIN
+					READ_STRREF fx_off+0x4 string
+					found_string=found_string || "%string%" STR_EQ "Slowed"
+				END ELSE
+				PATCH_IF opcode=142 BEGIN
+					READ_LONG fx_off+0x8 icon
+					found_icon=found_icon || icon=41
+				END
+			END			
+		END
+		PATCH_IF found_primary && (found_string || !check_string) && (found_icon || !check_icon) BEGIN
+			++total
+			PATCH_IF found_secondary BEGIN
+				++match
+				PATCH_IF display_match BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END ELSE BEGIN
+				PATCH_IF display_mismatch BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END
+		END
+		END
+	PRINT "%match%/%total%"
+END
+
+DEFINE_ACTION_FUNCTION check_charm_dressing
+	INT_VAR display_match=0 display_mismatch=1
+BEGIN
+	ACTION_IF GAME_IS BG2EE BEGIN
+		OUTER_SET dominate_strref=8364
+	END ELSE
+	ACTION_IF GAME_IS BGEE BEGIN
+		OUTER_SET dominate_strref=26206
+	END ELSE
+	ACTION_IF GAME_IS IWDEE BEGIN
+		OUTER_SET dominate_strref=35544
+	END
+	
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				glow=0
+				found_opcode_here=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=5 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch || !glow  || !("%anim%" STR_EQ ENCHAH) || (type<1000 && string=dominate_strref) || (type>=1000 && !(string=dominate_strref) )
+					PATCH_IF mismatch BEGIN
+						PATCH_PRINT "%glow% %anim% %type% %string%"
+					END
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_haste_dressing
+	INT_VAR display_match=0 display_mismatch=1
+BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				glow=0
+				sparkle=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=16 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=14023) || (LONG_AT (fx_off+0x4)=16233) || (LONG_AT (fx_off+0x4)=26019)
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow  || !found_string ||!("%anim%" STR_EQ "alterh")
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_invisibility_dressing
+	INT_VAR display_match=0 display_mismatch=1
+BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				glow=0
+				sparkle=0
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=20 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=37762) || LONG_AT (fx_off+0x4)=16233 || LONG_AT (fx_off+0x4)=31747
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow  || !found_string ||!("%anim%" STR_EQ "illush")
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF 0x8 name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+
+DEFINE_ACTION_FUNCTION check_panic_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=0
+				glow=0
+				sparkle=1
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=24 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=36)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=35484)
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ NECROH)||("%anim%" STR_EQ ENCHAH)||("%anim%" STR_EQ CONJUH)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+
+
+DEFINE_ACTION_FUNCTION check_poison_dressing
+	INT_VAR display_match=0 display_mismatch=1
+BEGIN
+	ACTION_IF GAME_IS BG2EE BEGIN
+		OUTER_SET poison_strref="-1"
+	END ELSE
+	ACTION_IF GAME_IS BGEE BEGIN
+		OUTER_SET poison_strref="-1"
+	END ELSE
+	ACTION_IF GAME_IS IWDEE BEGIN
+		OUTER_SET poison_strref=37607
+	END
+	
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				glow=1
+				found_opcode_here=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=25 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch || !(string=poison_strref)
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					PATCH_PRINT "%SOURCE_FILE%"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_confusion_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				icon="-1"
+				glow=1
+				sparkle=1
+				found_anim=0
+				found_opcode_here=0
+				found_string=1
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=128 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						READ_LONG fx_off+0x8 icon_here
+						PATCH_MATCH "%icon_here%" WITH
+						3 2 47 BEGIN
+							icon=icon_here
+						END
+						DEFAULT
+						END
+					END
+					PATCH_IF opcode=139 BEGIN
+						string_here=LONG_AT (fx_off+0x4)
+						PATCH_MATCH "%string_here%" WITH
+						37604 37603 /*14782 14791 25807 26184 */ BEGIN
+							string=string_here
+						END
+						DEFAULT
+						END
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ CONFUSH)
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					PATCH_PRINT "%icon% %string% %found_anim%"
+					mismatch=mismatch ||!sparkle || !glow 
+					mismatch=mismatch || !( ((icon=3 || icon=47) && (string=14782 || string=25807 || string=37604) && found_anim) || (icon=2 && (string=14791 || string=26184 || string=37603)))
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_silence_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=0
+				glow=0
+				sparkle=1
+				found_anim=0
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=38 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=34)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=37805)
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ ALTERH)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_stun_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=1
+				glow=1
+				sparkle=1
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=45 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=34)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=1280) || (LONG_AT (fx_off+0x4)=14043) || LONG_AT (fx_off+0x4)=26050 || LONG_AT (fx_off+0x4)=25862 || LONG_AT (fx_off+0x4)=35568
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ CDHORROR)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_blindness_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=1
+				glow=1
+				sparkle=1
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=74 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=8)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=14674) || (LONG_AT (fx_off+0x4)=37800)
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ ILLUSH)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+
+
+
+DEFINE_ACTION_FUNCTION check_feeblemind_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=0
+				glow=1
+				sparkle=1
+				found_anim=0
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=76 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=48)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=23744) || (LONG_AT (fx_off+0x4)=14407) //|| LONG_AT (fx_off+0x4)=16233
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_CMP "none")
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_disease_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=0
+				glow=0
+				sparkle=0
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=78 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=48)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=23744) //|| (LONG_AT (fx_off+0x4)=14043) //|| LONG_AT (fx_off+0x4)=16233
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ CDHORROR)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_deafness_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=0
+				glow=1
+				sparkle=1
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=80 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=112)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=14073) //|| (LONG_AT (fx_off+0x4)=14043) //|| LONG_AT (fx_off+0x4)=16233
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ CDHORROR)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+
+DEFINE_ACTION_FUNCTION check_paralysis_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+		COPY_EXISTING - "ghoul1.itm" nowhere
+			icon=13
+			GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF ab_ind=0 BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off ITM_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						PATCH_IF SHORT_AT fx_off=142 BEGIN
+							READ_LONG (fx_off+0x8) icon
+						END
+					END			
+				END
+			END
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=1
+				glow=1
+				sparkle=1
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=109 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=icon)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=14650) //|| (LONG_AT (fx_off+0x4)=14043) //|| LONG_AT (fx_off+0x4)=16233
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ CDHORROR)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+
+DEFINE_ACTION_FUNCTION check_hold_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=1
+				glow=1
+				sparkle=1
+				found_anim=0
+				found_opcode_here=0
+				found_string=1
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=175 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=13)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=1
+						//found_string=found_string || (LONG_AT (fx_off+0x4)=14650) //|| (LONG_AT (fx_off+0x4)=14043) //|| LONG_AT (fx_off+0x4)=16233
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ PARALH)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_slow_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=1
+				glow=1
+				sparkle=1
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				found_some_string=0
+				found_ac_mod=0
+				found_thac0_mod=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=40 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=41)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						READ_STRREF (fx_off+0x4) str
+						found_some_string=1
+						found_string=found_string || (LONG_AT (fx_off+0x4)=14668) || (LONG_AT (fx_off+0x4)=37787) 
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ ALTERH)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+					PATCH_IF opcode=0 BEGIN
+						found_ac_mod=1
+					END
+					PATCH_IF opcode=54 BEGIN
+						found_thac0_mod=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string ||!found_thac0_mod ||!found_ac_mod
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+
+DEFINE_ACTION_FUNCTION check_level_drain_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=1
+				glow=0
+				sparkle=0
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=216 BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=112)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						found_string=found_string || (LONG_AT (fx_off+0x4)=41495) || (LONG_AT (fx_off+0x4)=40968) || (LONG_AT (fx_off+0x4)=40969) || (LONG_AT (fx_off+0x4)=40979)|| LONG_AT (fx_off+0x4)=41616
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ CDHORROR)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_ability_drain_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=0
+				glow=1
+				sparkle=1
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					//PATCH_IF (opcode=6 || opcode=10 || opcode=15 || opcode=19 || opcode=44 || opcode=49) && ((LONG_AT (fx_off+0x4)<0 && LONG_AT (fx_off+0x8)=0) ||(LONG_AT (fx_off+0x4)<=5 && LONG_AT (fx_off+0x8)=1 )) && (BYTE_AT (fx_off+0xc)=0) BEGIN
+					PATCH_IF opcode=10 && ((LONG_AT (fx_off+0x4)<0 && LONG_AT (fx_off+0x8)=0) ||(LONG_AT (fx_off+0x4)<=5 && LONG_AT (fx_off+0x8)=1 )) && (BYTE_AT (fx_off+0xc)=0) BEGIN
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=86) || (LONG_AT (fx_off+0x8)=91) || (LONG_AT (fx_off+0x8)=113) 
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						//found_string=found_string || (LONG_AT (fx_off+0x4)=14042) || (LONG_AT (fx_off+0x4)=14021) || (LONG_AT (fx_off+0x4)=14047) || (LONG_AT (fx_off+0x4)=14024)|| LONG_AT (fx_off+0x4)=14029 || (LONG_AT (fx_off+0x4)=14034)|| LONG_AT (fx_off+0x4)=32089
+						found_string=found_string || (LONG_AT (fx_off+0x4)=14029) || (LONG_AT (fx_off+0x4)=25891) || (LONG_AT (fx_off+0x4)=25081) 
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ CDHORROR)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_lower_resistance_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=0
+				glow=1
+				sparkle=1
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF opcode=166 && ((LONG_AT (fx_off+0x4)<0 && LONG_AT (fx_off+0x8)=0) ||(LONG_AT (fx_off+0x4)<=5 && LONG_AT (fx_off+0x8)=1 )) && (BYTE_AT (fx_off+0xc)=0) BEGIN
+
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=106)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						READ_STRREF fx_off+0x4 string
+						found_string=found_string || !("%string%" STRING_CONTAINS_REGEXP "Magic Resistance")
+	//					found_string=found_string || (LONG_AT (fx_off+0x4)=25096) 
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ CDHORROR)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION check_lower_saving_throw_dressing
+	INT_VAR display_match=0 display_mismatch=1 output_mismatch_list=0
+BEGIN
+	ACTION_IF !FILE_EXISTS "weidu_external/data/dw_shared/dressing_data.txt" BEGIN
+	
+<<<<<<<<.../stratagems-inline/dressing_data.txt
+>>>>>>>>
+		COPY ".../stratagems-inline/dressing_data.txt" "weidu_external/data/dw_shared/dressing_data.txt"
+	
+	END
+
+	COPY_EXISTING_REGEXP - ".*\.eff" nowhere
+		TO_UPPER SOURCE_RES
+		SET $opcode_eff_arr("%SOURCE_RES%")=LONG_AT 0x10
+
+
+	OUTER_SET total_count=0
+	OUTER_SET match_count=0
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			mismatch=0
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				string="-1"
+				found_icon=0
+				glow=1
+				sparkle=1
+				found_anim=1
+				found_opcode_here=0
+				found_string=0
+				SPRINT anim "none"
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					READ_SHORT fx_off opcode
+					PATCH_IF opcode=177 BEGIN
+						READ_ASCII fx_off+0x14 eff
+						TO_UPPER eff
+						PATCH_IF VARIABLE_IS_SET $opcode_eff_arr("%eff%") BEGIN
+							opcode=$opcode_eff_arr("%eff%")
+						END
+					END
+					PATCH_IF (opcode=33||opcode=34||opcode=35||opcode=36||opcode=37||opcode=325) && ((LONG_AT (fx_off+0x4)<0 && LONG_AT (fx_off+0x8)=0) ||(LONG_AT (fx_off+0x4)<=5 && LONG_AT (fx_off+0x8)=1 )) && (BYTE_AT (fx_off+0xc)=0) BEGIN
+
+						found_opcode=1
+						found_opcode_here=1
+						type=LONG_AT (fx_off+0x8)
+					END
+					PATCH_IF opcode=142 BEGIN
+						found_icon=found_icon|| (LONG_AT (fx_off+0x8)=45)
+					END
+					PATCH_IF opcode=139 BEGIN
+						string=LONG_AT (fx_off+0x4)
+						READ_STRREF fx_off+0x4 string
+						found_string=found_string || (LONG_AT (fx_off+0x4)=44916) 
+					END
+					PATCH_IF opcode=215 BEGIN
+						READ_ASCII (fx_off+0x14) anim
+						found_anim=found_anim||("%anim%" STR_EQ CDHORROR)
+					END
+					PATCH_IF opcode=141 BEGIN
+						sparkle=1
+					END
+					PATCH_IF opcode=50 || opcode=61 BEGIN
+						glow=1
+					END
+				END
+				PATCH_IF found_opcode_here BEGIN
+					mismatch=mismatch ||!sparkle || !glow ||!found_icon || !found_anim || !found_string
+				END
+			END
+		END
+		PATCH_IF found_opcode BEGIN
+			++total_count
+			PATCH_IF mismatch BEGIN
+				PATCH_IF display_mismatch BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF output_mismatch_list BEGIN
+					INNER_ACTION BEGIN
+						APPEND_OUTER "weidu_external/data/dw_shared/dressing_data.txt" "%SOURCE_FILE%"
+					END
+				END
+			END ELSE BEGIN
+				++match_count
+				PATCH_IF display_match BEGIN
+					READ_STRREF name_loc name
+					PATCH_PRINT "%SOURCE_FILE% (%name%) - MATCH"
+				END
+			END
+		END
+	PRINT "%match_count%/%total_count%"
+END
+
+DEFINE_ACTION_FUNCTION explore_web BEGIN
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			icon="-1"
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					PATCH_IF (SHORT_AT fx_off)=157 BEGIN
+						found_opcode=1
+					END ELSE
+					PATCH_IF SHORT_AT fx_off=142 BEGIN
+						READ_LONG fx_off+0x8 icon
+					END
+				
+				END
+			END
+			PATCH_IF found_opcode BEGIN
+				SET $webs("%SOURCE_FILE%")=icon
+			END
+		END
+	ACTION_PHP_EACH webs AS k=>v BEGIN
+		PRINT "%k% (%v%)"
+	END
+
+
+
+END
+
+DEFINE_ACTION_FUNCTION explore_sleep_icon BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		TO_UPPER SOURCE_FILE
+		PATCH_IF BUFFER_LENGTH>0 && !VARIABLE_IS_SET $ignore_these_resources("%SOURCE_FILE%") BEGIN
+			found_opcode=0
+			found_235=0
+			icon="-1"
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+				name_loc=0xc
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+				name_loc=0x8
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS	
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					PATCH_IF (SHORT_AT fx_off)=39 BEGIN
+						found_opcode=1
+					END ELSE
+					PATCH_IF (SHORT_AT fx_off)=235 BEGIN
+						found_235=1
+					END ELSE
+					PATCH_IF SHORT_AT fx_off=142 BEGIN
+						READ_LONG fx_off+0x8 icon
+					END
+				
+				END
+			END
+			PATCH_IF found_opcode && found_235 BEGIN
+				SET $webs("%SOURCE_FILE%")=icon
+			END
+		END
+	ACTION_PHP_EACH webs AS k=>v BEGIN
+		PRINT "%k% (%v%)"
+	END
+
+
+END
+
+DEFINE_ACTION_FUNCTION display_icons BEGIN
+
+	COPY_EXISTING - statdesc.2da nowhere
+		READ_2DA_ENTRIES_NOW entries 3
+		FOR (row=0;row<entries;++row) BEGIN
+			READ_2DA_ENTRY_FORMER entries row 0 icon
+			READ_2DA_ENTRY_FORMER entries row 1 strref
+			GET_STRREF strref string
+			PATCH_PRINT "%icon%: %string%"
+		END
+
+
+END
+
+DEFINE_ACTION_FUNCTION research_haste_slow BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		haste_slow=0
+		removes=0
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF BYTE_AT ab_off>0 || "%SOURCE_EXT%" STR_EQ spl BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode
+						PATCH_IF opcode=16 || opcode=40 BEGIN
+							haste_slow=1
+						END ELSE
+						PATCH_IF opcode=240 BEGIN
+							removes=1
+						END
+					END
+				END
+			END
+			PATCH_IF haste_slow & removes BEGIN
+				PATCH_PRINT "%SOURCE_FILE%"
+			END
+		END
+END
+
+DEFINE_ACTION_FUNCTION research_13_55 BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		has_13=0
+		has_55=0
+		undead_are_immune=0
+		immune_opcode=(GAME_IS "iwd how totlm")?290:324
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				READ_STRREF 0xc name
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				READ_STRREF 0x8 name
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF BYTE_AT ab_off>0 || "%SOURCE_EXT%" STR_EQ spl BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode
+						PATCH_IF opcode=13 BEGIN
+							has_13=1
+						END ELSE
+						PATCH_IF opcode=55 BEGIN
+							has_55=1
+						END ELSE
+						PATCH_IF opcode= immune_opcode BEGIN
+							READ_LONG (fx_off+0x8) param2
+							undead_are_immune=undead_are_immune||(param2=1)||(param2=55)
+						END
+					END
+				END
+			END
+			PATCH_IF undead_are_immune BEGIN
+				PATCH_IF has_13 BEGIN
+					PATCH_PRINT "13 (undead immune):%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF has_55 BEGIN
+					PATCH_PRINT "55 (undead immune):%SOURCE_FILE% (%name%)"
+				END	
+			END ELSE BEGIN
+				PATCH_IF has_13 BEGIN
+					PATCH_PRINT "13:%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF has_55 BEGIN
+					PATCH_PRINT "55:%SOURCE_FILE% (%name%)"
+				END	
+			
+			END
+		END
+END
+
+DEFINE_ACTION_FUNCTION research_109_175 BEGIN
+
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		has_109=0
+		has_157=0
+		has_175=0
+		has_185=0
+		has_icon=0
+		has_string=0
+		undead_are_immune=0
+		immune_opcode=(GAME_IS "iwd how totlm")?290:324
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				READ_STRREF 0xc name
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				READ_STRREF 0x8 name
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF BYTE_AT ab_off>0 || "%SOURCE_EXT%" STR_EQ spl BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						READ_SHORT fx_off opcode
+						PATCH_IF opcode=109 BEGIN
+							has_109=1
+						END ELSE
+						PATCH_IF opcode=157 BEGIN
+							has_157=1
+						END ELSE
+						PATCH_IF opcode=175 BEGIN
+							has_175=1
+						END ELSE
+						PATCH_IF opcode=185 BEGIN
+							has_185=1
+						END ELSE
+						PATCH_IF opcode= immune_opcode BEGIN
+							READ_LONG (fx_off+0x8) param2
+							undead_are_immune=undead_are_immune||(param2=1)||(param2=55)
+						END ELSE BEGIN
+							PATCH_IF SHORT_AT fx_off=142 BEGIN
+								has_icon=1
+							END
+							PATCH_IF SHORT_AT fx_off=139 BEGIN
+								has_string=1
+							END
+						END
+					END
+				END
+			END
+			PATCH_IF undead_are_immune BEGIN
+				PATCH_IF has_109 BEGIN
+					PATCH_PRINT "109 (undead immune):%SOURCE_FILE% (%name%)"
+					PATCH_IF has_icon BEGIN
+						PATCH_PRINT "ICON"
+					END
+				END
+				PATCH_IF has_157 BEGIN
+					PATCH_PRINT "157 (undead immune):%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF has_175 BEGIN
+					PATCH_PRINT "175 (undead immune):%SOURCE_FILE% (%name%)"
+				END	
+				PATCH_IF has_185 BEGIN
+					PATCH_PRINT "185 (undead immune):%SOURCE_FILE% (%name%)"
+				END	
+				END ELSE BEGIN
+				PATCH_IF has_109 BEGIN
+					PATCH_PRINT "109:%SOURCE_FILE% (%name%)"
+					PATCH_IF has_icon BEGIN
+						PATCH_PRINT "ICON"
+					END
+				END
+				PATCH_IF has_157 BEGIN
+					PATCH_PRINT "157:%SOURCE_FILE% (%name%)"
+				END
+				PATCH_IF has_175 BEGIN
+					PATCH_PRINT "175:%SOURCE_FILE% (%name%)"
+					PATCH_IF has_string BEGIN
+						PATCH_PRINT "STRING"
+					END
+				END	
+				PATCH_IF has_185 BEGIN
+					PATCH_PRINT "185:%SOURCE_FILE% (%name%)"
+				END				
+			END
+		END
+END
+
+DEFINE_ACTION_FUNCTION research_13_55_immunity BEGIN
+
+	OUTER_SET extra_immune_opcode=(GAME_IS "iwd how totlm")?261:999
+	PRINT "%extra_immune_opcode%"
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		has_13=0
+		has_55=0
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				READ_STRREF 0xc name
+				GET_OFFSET_ARRAY fx_arr ITM_V10_GEN_EFFECTS
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					PATCH_IF SHORT_AT fx_off=101 || SHORT_AT fx_off=extra_immune_opcode BEGIN
+					READ_SHORT fx_off+0x8 opcode
+					PATCH_IF opcode=13 BEGIN
+						has_13=1
+					END ELSE
+					PATCH_IF opcode=55 BEGIN
+						has_55=1
+					END
+					END
+				END				
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				READ_STRREF 0x8 name
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF BYTE_AT ab_off>0 || "%SOURCE_EXT%" STR_EQ spl BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						PATCH_IF SHORT_AT fx_off=101 || SHORT_AT fx_off=extra_immune_opcode BEGIN
+						READ_SHORT fx_off+0x8 opcode
+						PATCH_IF opcode=13 BEGIN
+							has_13=1
+						END ELSE
+						PATCH_IF opcode=55 BEGIN
+							has_55=1
+						END
+						END
+					END
+				END
+			END
+			PATCH_IF has_13 && has_55 BEGIN
+				PATCH_PRINT "Both:%SOURCE_FILE% (%name%)"
+			END ELSE
+			PATCH_IF has_13 BEGIN
+				PATCH_PRINT "13:%SOURCE_FILE% (%name%)"
+			END ELSE
+			PATCH_IF has_55 BEGIN
+				PATCH_PRINT "55:%SOURCE_FILE% (%name%)"
+			END			
+		END
+END
+
+DEFINE_ACTION_FUNCTION research_109_175_immunity BEGIN
+
+	OUTER_SET extra_immune_opcode=(GAME_IS "iwd how totlm")?261:999
+	PRINT "%extra_immune_opcode%"
+	COPY_EXISTING_REGEXP - ".*\.\(itm\|spl\)" nowhere
+		has_109=0
+		has_157=0
+		has_175=0
+		has_185=0
+		has_icon=0
+		PATCH_IF BUFFER_LENGTH>0 BEGIN
+			PATCH_IF "%SOURCE_EXT%" STR_EQ itm BEGIN
+				READ_STRREF 0xc name
+				GET_OFFSET_ARRAY fx_arr ITM_V10_GEN_EFFECTS
+				PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+					PATCH_IF SHORT_AT fx_off=101 || SHORT_AT fx_off=extra_immune_opcode BEGIN
+						READ_SHORT fx_off+0x8 opcode
+						PATCH_IF opcode=109 BEGIN
+							has_109=1
+						END ELSE
+						PATCH_IF opcode=175 BEGIN
+							has_175=1
+						END ELSE
+						PATCH_IF opcode=185 BEGIN
+							has_185=1
+						END ELSE
+						PATCH_IF opcode=157 BEGIN
+							has_157=1
+						END
+					END
+				END				
+				GET_OFFSET_ARRAY ab_arr ITM_V10_HEADERS
+			END ELSE BEGIN
+				READ_STRREF 0x8 name
+				GET_OFFSET_ARRAY ab_arr SPL_V10_HEADERS
+			END
+			PHP_EACH ab_arr AS ab_ind=>ab_off BEGIN
+				PATCH_IF BYTE_AT ab_off>0 || "%SOURCE_EXT%" STR_EQ spl BEGIN
+					GET_OFFSET_ARRAY2 fx_arr ab_off SPL_V10_HEAD_EFFECTS
+					PHP_EACH fx_arr AS fx_ind=>fx_off BEGIN
+						PATCH_IF SHORT_AT fx_off=101 || SHORT_AT fx_off=extra_immune_opcode BEGIN
+							READ_SHORT fx_off+0x8 opcode						
+							PATCH_IF opcode=109 BEGIN
+								has_109=1
+							END ELSE
+							PATCH_IF opcode=175 BEGIN
+								has_175=1
+							END ELSE
+							PATCH_IF opcode=185 BEGIN
+								has_185=1
+							END ELSE
+							PATCH_IF opcode=157 BEGIN
+								has_157=1
+							END
+						END
+					END
+				END
+			END
+			PATCH_IF has_109 && has_175 BEGIN
+				PATCH_PRINT "Both:%SOURCE_FILE% (%name%)"
+			END ELSE
+			PATCH_IF has_109 BEGIN
+				PATCH_PRINT "109:%SOURCE_FILE% (%name%)"
+				PATCH_IF has_icon BEGIN
+					PATCH_PRINT "ICON"
+				END
+			END ELSE
+			PATCH_IF has_175 BEGIN
+				PATCH_PRINT "175:%SOURCE_FILE% (%name%)"
+				PATCH_IF has_icon BEGIN
+					PATCH_PRINT "ICON"
+				END
+			END			
+			PATCH_IF has_185 BEGIN
+				PATCH_PRINT "185:%SOURCE_FILE% (%name%)"
+			END	
+			PATCH_IF has_157 BEGIN
+				PATCH_PRINT "157:%SOURCE_FILE% (%name%)"
+			END	
+		END
+END

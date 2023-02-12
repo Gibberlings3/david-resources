@@ -1,0 +1,524 @@
+DEFINE_ACTION_FUNCTION cosmetic_opcode_fixes BEGIN
+
+	// In general IWD animations are by spell school, and don't normally seem to be associated with
+	// effects that aren't spells or spell-like abilities; glows are also by spell school. 
+
+	ACTION_IF !FILE_EXISTS "weidu_external/markers/dw-cosmetic_opcode_fixes.mrk" BEGIN // idempotence
+	
+		COPY_EXISTING "misc01.itm" "weidu_external/markers/dw-cosmetic_opcode_fixes.mrk"
+
+		//////////////////////////////////////////////////
+		/*
+		Charm
+		
+		Animation 'enchah'
+		String/icon included
+		School-based animation and glow (default is ENCHAH, 80/210/80)
+		
+		*/
+		///////////////////////////////////////////////////
+
+		// Cleric Mental Domination uses wrong charm type (leads to redundant 'Dire Charmed' string)
+		
+		COPY_EXISTING "sppr405.spl" override
+			LPF ALTER_EFFECT INT_VAR match_opcode=5 parameter2=1003 END
+
+		//////////////////////////////////////////////////
+		/*
+		Haste
+		
+		School-based animation and glow (default is ALTERH, 75/210/160)
+		String 'hasted' (14023)
+		
+		*/
+		///////////////////////////////////////////////////
+
+
+		// haste effects missing their animation and glow
+		
+		ACTION_FOR_EACH resource IN 	
+			spwi711.spl // sphere of chaos	
+			spwm115.spl // wild magic haste
+		BEGIN
+			COPY_EXISTING "%resource%" override  
+				LPF CLONE_EFFECT INT_VAR match_opcode=16 opcode=215 parameter2=0 timing=1 STR_VAR resource=ALTERH END
+				LPF CLONE_EFFECT INT_VAR match_opcode=16 opcode=61 parameter2=30*0x10000 duration=0 timing=1 parameter1=(75*0x100 + 210*0x10000 + 160*0x1000000)  END
+			IF_EXISTS
+		END
+		
+		// haste effects missing the 'hasted' string
+		
+		ACTION_FOR_EACH resource IN
+			spwi711.spl // sphere of chaos
+			spin978.spl // golem haste	
+			spwm115.spl // wild magic haste
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=16 opcode=139 parameter1=14023 parameter2=0 duration=0 timing=1 END
+			IF_EXISTS
+		END
+		
+
+	
+	
+		////////////////////////////////////////////////////////////////////////
+		/*
+		Invisibility (20)
+		
+		Standard version: applies opcode 20; displays string 37762 ('invisible'), color glow (normally 61, 80/90/210), animation ILLUSH
+		*/
+		////////////////////////////////////////////////////////////////////////
+	
+		// all good afaict
+		
+		
+		//////////////////////////////////////////////////////////////////////////////////////
+		/* Panic (24)
+		
+		The icon is clearly standard.
+		
+		'panic' string (35484) 
+		
+		We ignore apparently-unused SPCL908 (unused HLA), SPIN921
+		*/
+		////////////////////////////////////////////////////////////////////////////////////////
+		
+		// panic effects missing string
+		
+		ACTION_FOR_EACH resource IN 
+			SPPR706.SPL // symbol:fear (x4)
+			SPWI811.SPL
+			SPWI899.SPL
+			SPWM123.SPL
+			WAND02.ITM  // wand of fear
+			BDSHA01C.SPL
+			BEARSPIR.ITM // spirit bear weapons
+			SPBATT1.ITM
+			SPBATT2.ITM
+			SPBATT3.ITM
+			SPBATT4.ITM
+			SPBATT5.ITM
+			ZZJ6SP.ITM // Selune's Promise
+
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=24 opcode=139 parameter1=35484 parameter2=0 duration=0 timing=1 END		
+		END
+		
+		// panic effects missing icon
+
+		ACTION_FOR_EACH resource IN
+			BEARSPIR.ITM //Spirit bear weapons
+			SPBATT1.ITM
+			SPBATT2.ITM
+			SPBATT3.ITM
+			SPBATT4.ITM
+			SPBATT5.ITM
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=24 opcode=142 parameter1=0 parameter2=36 END	
+			IF_EXISTS
+		END
+
+		////////////////////////////////////////////////////
+		/*
+		Poison (25)
+		Unlike BG(2), IWD has a clear convention that the 'poisoned' string (37607) is 
+		displayed on poison attacks. That convention hasn't been rolled out to EE-specific
+		resources, but nor is it rolled back on oIWD resources, so there's an inconsistency. I think
+		the most natural resolution is to defer to the original game.
+		
+		We skip these unused resources: AROW12.ITM, ETTERC2.ITM, JELLMU1.ITM, SPPR722.SPL, SPWI008.SPL
+		*/
+		//////////////////////////////////////////////////////
+
+		//poison effects missing string
+
+		ACTION_FOR_EACH resource IN 
+			PLYJELLY.ITM // polymorph items
+			PLYSPID.ITM
+			PLYWYVRN.ITM 
+			SNAKSPIR.ITM // snake spirit
+			SPSATT1.ITM
+			SPSATT2.ITM
+			SPSATT3.ITM
+			SPSATT4.ITM
+			SPSATT5.ITM
+			SPCL422.SPL // poison class ability
+			SPIN733.SPL // wish effect
+			SPIN979.SPL // adamantite golem poison cloud - used by Wish
+			SPPR411.SPL // poison cleric spell
+			SPWI019.SPL // poison dart traps
+			SPWI028.SPL
+			SPWI029.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=25 opcode=139 parameter1=37607 parameter2=0 duration=0 timing=1 END		
+		END		
+	
+		////////////////////////////////////////////////////
+		/*
+		Silence (38)
+		
+		Silence effect; glow (normally 61 at 75/210/160, cycle speed 25); string 'silenced'; silence icon; animation if appropriate
+		
+		PW silence probably ought to have a glow (oIWD bug, if so) but I lack the artistic skill to work out what it should be (it needs to match the PWSILEN animation)
+		The wand of cursing is multifarious enough that I'll leave it alone (in any case it's an edge-case item associated to Wish)
+		*/
+		//////////////////////////////////////////////////////
+
+
+		//////////////////////////////////////////////////////////////////////////
+		//
+		/*
+		Sleep (39)
+
+		39 is less overloaded in IWDEE, which doesn't use knockback (except in a single Wish effect that I think we can skip)
+		and treats Hopelessness as a stun effect.
+		It's used for:
+		- being put to sleep (example: Sleep, SPWI116.SPL) - should display 'sleep' icon and show 'sleep' string (37613)
+		- being rendered unconscious (example: Color Spray, SPWI105.SPL) - functionally equivalent to sleep, so best to dress the same way
+		- being nauseated (example: Stinking Cloud, SPWI213.SPL) - should display 'nauseated' icon
+
+		*/
+		/////////////////////////////////////////////////////////////////////////
+
+		// I don't think we need to do anything here (icons are handled in the main patch)
+
+
+
+		////////////////////////////////////////////////////
+		/*
+		Slow (40)
+		
+		Slow has a built-in icon, but needs to display the string 'slowed' (14668 - even in IWDEE - or 37787) or 'slow' (14000) (we default to 14668)	
+		If appropriate it also provides an ALTERH animation and 75/210/160 fade
+		
+		Ignore unused: SPCL123.SPL,SPCL422.SPL,JELLMU1.ITM
+		Avoid messing with Writhing Fog
+		Also ignore potn32 as a special case
+		*/
+		//////////////////////////////////////////////////////
+
+		// missing string
+
+		ACTION_FOR_EACH resource IN
+			PLYJELLY.ITM // jelly attack
+			SPCL415.SPL // trap
+			SPWM112.SPL // wild magic effect
+			SPIN977.SPL // Golem slow	
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=40 opcode=139 timing=1 duration=0 parameter1=14668 parameter2=0 END
+			IF_EXISTS
+		
+		END
+
+		////////////////////////////////////////////////////
+		/*
+		Blindness (74)
+		
+		the only totally reliable thing is the string (37800) since the opcode enforces the icon. Animation (usually ILLUSH) and accompanying glow
+		are common but by no means standard, I guess because blindness is so often a side-effect of other things.
+		
+		*/
+		//////////////////////////////////////////////////////
+
+		///all good, nothing to add
+
+
+		////////////////////////////////////////////////////
+		/*
+		Feeblemind (76)
+		
+		Feeblemind applies the opcode and icon 48, and uses the string 14407.
+		One exception: it's a secondary effect in polymorph other (Also used in Sphere of Chaos).
+		
+		Ignore INSANITY.SPL, which is unused from BG2EE
+		*/
+		//////////////////////////////////////////////////////
+
+		// missing string
+		
+		ACTION_FOR_EACH resource IN
+			SPPR650.SPL //spiritual lock
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=76 opcode=139 parameter1=14407 parameter2=0 duration=0 timing=1 END
+			IF_EXISTS
+		END
+		
+
+		////////////////////////////////////////////////////
+		/*
+		Deafness (80)
+		
+		Comes with a string (14073) and icon 112
+		*/
+		//////////////////////////////////////////////////////
+		
+		// missing icon
+		
+		ACTION_FOR_EACH resource IN
+			SPWI431.SPL //shout
+			SPWI806.SPL // great shout
+			SPPR710.SPL //holy word
+			SPPR715.SPL //unholy word
+			WAND19.ITM //wand of cursing
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=80 opcode=142 parameter1=0 parameter2=112 END
+		END
+	
+		////////////////////////////////////////////////////
+		/*
+		Paralysis (109)
+		
+		Should come with a string ('paralyzed'), an icon (originally 13, but changed to 214 by me), and if appropriate an animation/glow
+		*/
+		//////////////////////////////////////////////////////
+
+		// paralyzation effects missing string
+		
+		ACTION_FOR_EACH resource IN
+			CARRIO1.ITM
+			GHAST1.ITM
+			GHOUL1.ITM
+			GHOULT.ITM
+			SPWI711.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=109 opcode=139 parameter1=14650 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS				
+		END
+
+		// ghast1 lacks icon and glow (but ghoul1 has it, so surely a bug)
+		
+		COPY_EXISTING "ghast1.itm" override
+			LPF CLONE_EFFECT INT_VAR match_opcode=109 opcode=215 timing=1 STR_VAR resource=NECROH END
+			LPF CLONE_EFFECT INT_VAR match_opcode=109 opcode=61 parameter1=180*0x100+210*0x10000+80*0x1000000 parameter2=30 END
+
+
+
+		////////////////////////////////////////////////////
+		/*
+		Confusion (128)
+		
+		1) 'Confusion' - opcode, icon 3 ('confused'), display string 37604 ('confused'), play animation CONFUSH with no glow
+		2) 'Chaos' - same, but icon 47 ('chaos')
+		3) 'Rigid thinking' opcode icon 2 ('rigid thinking'), string 37603 ('rigid thinking'), play animation as appropriate by school
+		*/
+		//////////////////////////////////////////////////////
+		
+		// confusion effects missing string
+		
+		ACTION_FOR_EACH resource IN
+			SPWI711.SPL // sphere of chaos
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=128 opcode=139 parameter1=37604 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS	
+		END
+		
+		COPY_EXISTING "SPCL751A.SPL" override
+			LPF CLONE_EFFECT INT_VAR header=2 match_opcode=128 opcode=139 parameter1=37604 parameter2=0 duration=0 timing=1 END	
+		
+		
+		// confusion effects missing icon
+
+		ACTION_FOR_EACH resource IN
+			SPWI711.SPL // sphere of chaos
+			SPCL751A.SPL //Jester music
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=128 opcode=142 parameter1=0 parameter2=3 END			
+			IF_EXISTS
+		END
+		
+		// Jester melody ought to use IWD animation not BG2 one
+		
+		COPY_EXISTING SPCL751A.SPL override
+			LPF ALTER_EFFECT STR_VAR match_resource=SPCONFUS resource=CONFUSH END
+		
+
+		////////////////////////////////////////////////////
+		/*
+		Hold (175)
+		
+		Almost all built in to the opcode, but we do need the 'PARALH' animation
+		*/
+		//////////////////////////////////////////////////////
+	
+		// snare should use PARALH, not MINDAT
+		
+		COPY_EXISTING "cdhdb30.eff" override
+			REPLACE_TEXTUALLY "MINDAT" "PARALH"
+	
+	
+		// energy drain (216) doesn't exist in oIWD and has been imported competently
+		
+
+	/////////////////////////////////////////////////////////
+	//////////////////////////////////////////////////////////
+	//
+	/*
+	These opcodes cannot be removed. I focus just on their deleterious
+	versions.
+	*/
+	///////////////////////////////////////////////////////////
+
+	/////////////////////////////////////////////////////////////
+	/*
+	Ability drain (lumped together): Charisma (6), Constitution (10), Dexterity (15), Intelligence (19), Strength (44), Wisdom (49)
+
+	In drain mode, the default version is 
+	(1) opcode; 'ability score drained' icon (91); displayed string '[Ability] modification': STR (14042) INT (14021) WIS (14047) DEX (14024) CON (14029) CHA (14034)
+	(the string is only haphazardly used but I think the general design principles support rolling it out)
+	There are several alternatives:
+	(2) 'weakened' (STR/DEX/CHA drain from Zombie Lord aura)
+	(3) suffocating (reduces DEX and other things; uses 'slow' icon; ideally would have its own string/icon but out of scope)
+	(4) pain (from Symbol of Pain - reduces DEX and also AC)
+	(5) Enfeeblement: opcode, string 'enfeebled', icon 113
+	
+	(2) Mind flayer drain. opcode; 'intelligence drained by mind flayer' icon (86); displayed string 'Devour Brain' (32089)
+	(3) BG energy drain (as per Kirinhale): applies 'energy drain' icon and reduces abilities and saves - probably best left alone
+	(4) Pain (from Chromatic Orb and Symbol of Pain), which is a slightly awkward special case. Absent appropriate icons/strings, leave alone.
+	(5) Enfeeblement: opcode, string 'enfeebled', icon 113
+	(6) a bunch of curses, which use the opcode, dispay 'you have been cursed with WHATEVER', and should (but don't) apply the ability drain icon
+
+	These are skipped (as scripted effects)
+
+
+		
+	We also skip various items that increase some ability scores and decrease others:
+	OHNPOTN1.ITM, POTN15.ITM, POTN16.ITM, POTN46.ITM
+	*/
+	///////////////////////////////////////////////////////////////
+
+		// missing icons - ability drain
+
+		//str
+		ACTION_FOR_EACH resource IN
+			SPIN190.SPL // zombie lord aura
+			SPPR423.SPL // cloud of pestilence
+			SPWI030.SPL //death fog trap
+			SPWI614.SPL // death fog
+			SPWISH41.SPL // wish effect
+			SPWM118.SPL // wild magic effect
+			DOBONE.ITM // dart of bone
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=44 opcode=142 parameter1=0 parameter2=91 END	
+		END
+		
+		//dex
+		ACTION_FOR_EACH resource IN
+			ICETRL.ITM 
+			SPWISH44.SPL
+			// death fog already done
+			// zombie lord aura already done
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=15 opcode=142 parameter1=0 parameter2=91 END	
+		END		
+
+		//con
+		ACTION_FOR_EACH resource IN
+			SPWISH43.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=10 opcode=142 parameter1=0 parameter2=91 END		
+		END		
+	
+		//int
+		ACTION_FOR_EACH resource IN
+			SPWISH45.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR silent=1 match_opcode=19 opcode=142 parameter1=0 parameter2=91 END		
+		END	
+		
+		//wis
+		ACTION_FOR_EACH resource IN
+			SPWISH42.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=49 opcode=142 parameter1=0 parameter2=91 END	
+		END
+		
+		//cha - only one is zombie lord aura, already done
+
+		// missing strings, ability drain
+
+		// str
+
+		ACTION_FOR_EACH resource IN
+			DOBONE.ITM  //dart of bone
+			SPPR423.SPL // cloud of pestilence
+			TROLLSPI.ITM // spirit troll
+			SPIN119.SPL //great roar
+			SPWI030.SPL //death fog (trap)
+			SPWI614.SPL // death fog
+			SPWM118.SPL // wild magic effect
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=44 opcode=139 parameter1=14042 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS						
+		END
+
+		//dex
+		
+		ACTION_FOR_EACH resource IN
+			ICETRL.ITM
+			SPWI030.SPL //death fog trap
+			SPWI614.SPL // death fog
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=15 opcode=139 parameter1=14024 parameter2=0 duration=0 timing=1 END	
+			IF_EXISTS											
+		END
+
+		// rest all good
+
+
+	/////////////////////////////////////////////////////////////
+	/*
+	Lower Resistance (166)
+
+	This is not used in oIWD, so we just have to deal with EE-imported resources.
+	Basically all is fine but there is a missing string on Pierce Magic
+	*/
+	///////////////////////////////////////////////////////////////
+
+		
+		// missing MR string
+
+		ACTION_FOR_EACH resource IN
+			SPWI608.SPL
+		BEGIN
+			COPY_EXISTING "%resource%" override
+				LPF CLONE_EFFECT INT_VAR match_opcode=166 opcode=139 parameter1=14790 parameter2=0 timing=1 duration=0 END
+			IF_EXISTS
+		END			
+
+	/////////////////////////////////////////////////////////////
+	/*
+	Saving throw reduction (33-37,325)
+
+	I think in IWD this is basically fine
+	*/
+	///////////////////////////////////////////////////////////////
+
+	/////////////////////////////////////////////////////////////
+	/*
+	Web (157)
+
+	Comes with the icon 'webbed' (129) and the opcode; IWD does not use a string. No need for any fixes.
+
+	*/
+	///////////////////////////////////////////////////////////////
+		
+	
+
+	END
+END
