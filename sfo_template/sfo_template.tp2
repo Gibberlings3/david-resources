@@ -1,0 +1,18 @@
+
+
+BACKUP ~weidu_external/backup/sfo_template~
+AUTHOR "DavidW"
+MODDER setup_tra none area_variables none missing_extern none missing_resref none ict2_actions none missing_eval none overwriting_file none fun_args warn
+VERSION ~1.0~
+
+AUTO_EVAL_STRINGS
+
+ALWAYS 
+	INCLUDE "%MOD_FOLDER%/sfo/sfo_init.tpc"
+END
+
+BEGIN "Install Test" DESIGNATED 0 NO_LOG_RECORD
+
+BEGIN "Regenerate documentation" DESIGNATED 100
+
+LAF funlib_document_libraries END
